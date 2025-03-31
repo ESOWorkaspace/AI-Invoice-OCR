@@ -1,0 +1,459 @@
+/**
+ * Controller for OCR operations
+ */
+const { ProcessedInvoice, RawOCRData } = require('../models');
+const { sequelize } = require('../config/database');
+const { Op } = require('sequelize');
+const uuid = require('uuid');
+const path = require('path');
+const fs = require('fs');
+const moment = require('moment');
+
+/**
+ * Save OCR data to the database
+ */
+exports.saveOcrData = async (req, res) => {
+  const requestId = uuid.v4().substring(0, 8);
+  console.log(`[${requestId}] Saving OCR data`);
+  
+  try {
+    // Extract data from the request
+    const { originalData, editedData, imageData } = req.body;
+    
+    if (!editedData) {
+      return res.status(400).json({
+        error: {
+          message: 'Edited data is required'
+        }
+      });
+    }
+    
+    console.log(`[${requestId}] Received OCR data structure:`, JSON.stringify(editedData, null, 2).substring(0, 500) + '...');
+    
+    // Extract invoice details from edited data
+    // First try to get invoice number from the proper location in OCR data structure
+    let base_invoice_number = '';
+    
+    if (editedData.output && editedData.output.nomor_referensi && editedData.output.nomor_referensi.value) {
+      base_invoice_number = editedData.output.nomor_referensi.value;
+      console.log(`[${requestId}] Found invoice number in OCR data: ${base_invoice_number}`);
+    } else if (editedData.invoice_number) {
+      base_invoice_number = editedData.invoice_number;
+      console.log(`[${requestId}] Using provided invoice_number: ${base_invoice_number}`);
+    } else {
+      // Generate a unique invoice number if none is found
+      base_invoice_number = `INV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      console.log(`[${requestId}] Generated random invoice number: ${base_invoice_number}`);
+    }
+    
+    let invoice_number = base_invoice_number;
+    
+    // Extract other invoice details
+    let supplier_name = '';
+    if (editedData.output && editedData.output.nama_supplier && editedData.output.nama_supplier.value) {
+      supplier_name = editedData.output.nama_supplier.value;
+    } else if (editedData.supplier_name) {
+      supplier_name = editedData.supplier_name;
+    }
+    
+    // Extract invoice date
+    let invoice_date = null;
+    if (editedData.output && editedData.output.tanggal_faktur && editedData.output.tanggal_faktur.value) {
+      // Try to parse date in DD-MM-YYYY format
+      invoice_date = moment(editedData.output.tanggal_faktur.value, 'DD-MM-YYYY').toDate();
+    } else if (editedData.invoice_date) {
+      invoice_date = moment(editedData.invoice_date).toDate();
+    }
+    
+    // Ensure we always have a date for RawOCRData (required by model)
+    const raw_ocr_invoice_date = invoice_date || new Date();
+    
+    // Extract due date
+    let due_date = null;
+    if (editedData.output && editedData.output.tgl_jatuh_tempo && editedData.output.tgl_jatuh_tempo.value) {
+      due_date = moment(editedData.output.tgl_jatuh_tempo.value, 'DD-MM-YYYY').toDate();
+    } else if (editedData.due_date) {
+      due_date = moment(editedData.due_date).toDate();
+    }
+    
+    // Extract payment type
+    let payment_type = '';
+    if (editedData.output && editedData.output.tipe_pembayaran && editedData.output.tipe_pembayaran.value) {
+      payment_type = editedData.output.tipe_pembayaran.value;
+    } else if (editedData.payment_type) {
+      payment_type = editedData.payment_type;
+    }
+    
+    // Extract tax inclusion
+    let include_tax = false;
+    if (editedData.output && editedData.output.include_ppn && editedData.output.include_ppn.value !== undefined) {
+      include_tax = Boolean(editedData.output.include_ppn.value);
+    } else if (editedData.include_tax !== undefined) {
+      include_tax = Boolean(editedData.include_tax);
+    }
+    
+    // Extract salesman
+    let salesman = '';
+    if (editedData.output && editedData.output.salesman && editedData.output.salesman.value) {
+      salesman = editedData.output.salesman.value;
+    } else if (editedData.salesman) {
+      salesman = editedData.salesman;
+    }
+    
+    // Extract tax rate
+    let tax_rate = 11.0; // Default PPN rate
+    if (editedData.output && editedData.output.ppn_rate && editedData.output.ppn_rate.value) {
+      tax_rate = parseFloat(editedData.output.ppn_rate.value) || 11.0;
+    } else if (editedData.tax_rate !== undefined) {
+      tax_rate = parseFloat(editedData.tax_rate) || 11.0;
+    }
+    
+    // Process items - Format them according to the frontend's expected structure
+    let sourceItems = [];
+    
+    if (editedData.output && editedData.output.items && Array.isArray(editedData.output.items)) {
+      sourceItems = editedData.output.items;
+    } else if (editedData.items && Array.isArray(editedData.items)) {
+      sourceItems = editedData.items;
+    }
+    
+    // Create items in the format expected by the frontend
+    const items = sourceItems.map((item, index) => {
+      return {
+        id: index + 1,
+        product_code: item.kode_barang_invoice?.value || item.code || '',
+        product_name: item.nama_barang_invoice?.value || item.name || '',
+        quantity: parseFloat(item.qty?.value || item.quantity || 0),
+        unit: item.satuan?.value || item.unit || '',
+        price: parseFloat(item.harga_satuan?.value || item.price || 0),
+        total: parseFloat(item.jumlah_netto?.value || item.total || 0)
+      };
+    });
+    
+    console.log(`[${requestId}] Processed invoice data:`, {
+      invoice_number,
+      supplier_name,
+      invoice_date: invoice_date ? invoice_date.toISOString() : null,
+      due_date: due_date ? due_date.toISOString() : null,
+      payment_type,
+      include_tax,
+      salesman,
+      tax_rate,
+      items_count: items.length
+    });
+    
+    // Process image data if provided
+    let binary_image_data = null;
+    let image_content_type = null;
+    
+    if (imageData) {
+      try {
+        // Check if the image data is a base64 string
+        if (typeof imageData === 'string' && imageData.startsWith('data:')) {
+          // Extract content type and base64 data
+          const matches = imageData.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
+          
+          if (matches && matches.length === 3) {
+            image_content_type = matches[1];
+            const base64Data = matches[2];
+            binary_image_data = Buffer.from(base64Data, 'base64');
+            
+            console.log(`[${requestId}] Image decoded successfully. Content type: ${image_content_type}, Size: ${binary_image_data.length} bytes`);
+          } else {
+            console.log(`[${requestId}] Invalid base64 image format`);
+          }
+        } else {
+          console.log(`[${requestId}] Invalid base64 image format`);
+        }
+      } catch (error) {
+        console.error(`[${requestId}] Error processing image data:`, error);
+        // Continue without image if there's an error
+        binary_image_data = null;
+        image_content_type = null;
+      }
+    }
+    
+    // Use a transaction for database operations
+    const result = await sequelize.transaction(async (transaction) => {
+      // Check if invoice already exists and handle duplicate invoice numbers
+      let existing_invoice = await ProcessedInvoice.findOne({
+        where: { invoice_number },
+        transaction
+      });
+      
+      // If invoice number already exists, add a suffix (-2, -3, etc.)
+      if (existing_invoice) {
+        console.log(`[${requestId}] Invoice number ${invoice_number} already exists, generating a new one`);
+        
+        // Find all invoices with the same base number
+        const similarInvoices = await ProcessedInvoice.findAll({
+          where: {
+            invoice_number: {
+              [Op.like]: `${base_invoice_number}%`
+            }
+          },
+          transaction
+        });
+        
+        if (similarInvoices.length > 0) {
+          // Find the highest suffix number
+          let maxSuffix = 1;
+          
+          for (const inv of similarInvoices) {
+            const match = inv.invoice_number.match(new RegExp(`${base_invoice_number}-([0-9]+)$`));
+            if (match && match[1]) {
+              const suffix = parseInt(match[1], 10);
+              if (suffix >= maxSuffix) {
+                maxSuffix = suffix + 1;
+              }
+            }
+          }
+          
+          // Generate new invoice number with suffix
+          invoice_number = `${base_invoice_number}-${maxSuffix}`;
+          console.log(`[${requestId}] Generated new invoice number: ${invoice_number}`);
+          
+          // Check if the new number also exists (just to be safe)
+          existing_invoice = await ProcessedInvoice.findOne({
+            where: { invoice_number },
+            transaction
+          });
+        }
+      }
+      
+      let invoice_id;
+      
+      if (existing_invoice) {
+        // Update existing invoice
+        console.log(`[${requestId}] Updating existing invoice: ${existing_invoice.id}`);
+        
+        const update_values = {
+          document_type: 'Invoice',
+          supplier_name,
+          invoice_date,
+          due_date,
+          payment_type,
+          include_tax,
+          salesman,
+          tax_rate,
+          items, // Store as JSON object
+          updated_at: new Date()
+        };
+        
+        // Add binary image data if available
+        if (binary_image_data) {
+          update_values.image_data = binary_image_data;
+          update_values.image_content_type = image_content_type;
+        }
+        
+        await existing_invoice.update(update_values, { transaction });
+        
+        // Update raw OCR data if it exists
+        const existing_raw = await RawOCRData.findOne({
+          where: { invoice_number },
+          transaction
+        });
+        
+        if (existing_raw) {
+          await existing_raw.update({
+            invoice_date: raw_ocr_invoice_date,
+            raw_data: originalData,
+            updated_at: new Date()
+          }, { transaction });
+        } else {
+          // Create raw OCR data if it doesn't exist
+          await RawOCRData.create({
+            invoice_number,
+            invoice_date: raw_ocr_invoice_date,
+            raw_data: originalData,
+            processed_invoice_id: existing_invoice.id
+          }, { transaction });
+        }
+        
+        invoice_id = existing_invoice.id;
+      } else {
+        // Create new processed invoice
+        console.log(`[${requestId}] Creating new invoice with number: ${invoice_number}`);
+        
+        const new_invoice_data = {
+          invoice_number,
+          document_type: 'Invoice',
+          supplier_name,
+          invoice_date,
+          due_date,
+          payment_type,
+          include_tax,
+          salesman,
+          tax_rate,
+          items // Store as JSON object
+        };
+        
+        // Add binary image data if available
+        if (binary_image_data) {
+          new_invoice_data.image_data = binary_image_data;
+          new_invoice_data.image_content_type = image_content_type;
+        }
+        
+        const new_invoice = await ProcessedInvoice.create(new_invoice_data, { transaction });
+        
+        // Create raw OCR data
+        await RawOCRData.create({
+          invoice_number,
+          invoice_date: raw_ocr_invoice_date, // Use the non-null date
+          raw_data: originalData,
+          processed_invoice_id: new_invoice.id
+        }, { transaction });
+        
+        invoice_id = new_invoice.id;
+      }
+      
+      return { id: invoice_id, invoice_number };
+    });
+    
+    console.log(`[${requestId}] OCR data saved successfully. Invoice ID: ${result.id}, Invoice Number: ${result.invoice_number}`);
+    
+    res.status(200).json({
+      success: true,
+      data: {
+        id: result.id,
+        invoice_number: result.invoice_number,
+        saved_at: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    console.error(`[${requestId}] Error saving OCR data:`, error);
+    
+    res.status(500).json({
+      error: {
+        message: `Failed to save OCR data: ${error.message}`,
+        detail: error.stack
+      }
+    });
+  }
+};
+
+/**
+ * Get OCR results for an invoice
+ */
+exports.getOcrResults = async (req, res) => {
+  const requestId = uuid.v4().substring(0, 8);
+  const { invoice_number } = req.params;
+  console.log(`[${requestId}] Getting OCR results for invoice: ${invoice_number}`);
+  
+  try {
+    const raw_data = await RawOCRData.findOne({
+      where: { invoice_number },
+      include: [
+        {
+          model: ProcessedInvoice,
+          as: 'processed_invoice'
+        }
+      ]
+    });
+    
+    if (!raw_data) {
+      console.log(`[${requestId}] OCR data not found for invoice: ${invoice_number}`);
+      return res.status(404).json({
+        error: {
+          message: 'OCR data not found for this invoice'
+        }
+      });
+    }
+    
+    console.log(`[${requestId}] OCR data found for invoice: ${invoice_number}`);
+    res.json(raw_data);
+  } catch (error) {
+    console.error(`[${requestId}] Error getting OCR results:`, error);
+    res.status(500).json({
+      error: {
+        message: 'Error retrieving OCR results',
+        details: error.message
+      }
+    });
+  }
+};
+
+/**
+ * Upload file for OCR processing
+ */
+exports.uploadFile = async (req, res) => {
+  const requestId = uuid.v4().substring(0, 8);
+  console.log(`[${requestId}] Processing file upload for OCR`);
+  
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        error: {
+          message: 'No file uploaded'
+        }
+      });
+    }
+    
+    console.log(`[${requestId}] File received: ${req.file.originalname}`);
+    
+    // In a real implementation, you would send this file to an OCR service
+    // and process the results. For now, we'll return a simple success response.
+    
+    res.status(200).json({
+      success: true,
+      file: {
+        filename: req.file.filename,
+        originalname: req.file.originalname,
+        size: req.file.size,
+        path: req.file.path
+      },
+      message: 'File uploaded successfully. Please note that actual OCR processing needs to be implemented.'
+    });
+  } catch (error) {
+    console.error(`[${requestId}] Error uploading file:`, error);
+    res.status(500).json({
+      error: {
+        message: 'Error uploading file',
+        details: error.message
+      }
+    });
+  }
+};
+
+/**
+ * Test database connection
+ */
+exports.testConnection = async (req, res) => {
+  const requestId = uuid.v4().substring(0, 8);
+  console.log(`[${requestId}] Testing database connection`);
+  
+  try {
+    // Test database connection
+    await sequelize.authenticate();
+    
+    // Test file system access
+    const uploadDir = path.join(__dirname, '../../uploads');
+    
+    // Create uploads directory if it doesn't exist
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    
+    // Check if directory is writable
+    const testFile = path.join(uploadDir, 'test.txt');
+    fs.writeFileSync(testFile, 'Test file');
+    fs.unlinkSync(testFile);
+    
+    console.log(`[${requestId}] Connection test successful`);
+    
+    res.status(200).json({
+      success: true,
+      database: 'Connected',
+      filesystem: 'Writable',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error(`[${requestId}] Connection test failed:`, error);
+    res.status(500).json({
+      error: {
+        message: 'Connection test failed',
+        details: error.message
+      }
+    });
+  }
+};
