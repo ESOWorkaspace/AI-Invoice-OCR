@@ -85,3 +85,7 @@ coverage/
 # Temporary files
 tmp/
 temp/
+
+
+# windsurf rules
+.windsurfrules
