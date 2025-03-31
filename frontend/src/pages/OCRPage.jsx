@@ -192,7 +192,7 @@ const mockData = [
 // API endpoint configuration
 const API_ENDPOINT = import.meta.env.VITE_API_OCR_PROCESS_FILE || 'http://amien-server:1880/testingupload';
 const API_TOKEN = import.meta.env.VITE_API_OCR_AUTH_TOKEN || 'a3f5d6e8b9c0a1b2d3e4f5g6h7i8j9k0l1m2n3o4p5q6r7s8';
-const SAVE_API_ENDPOINT = import.meta.env.VITE_API_SAVE_ENDPOINT || 'http://localhost:8000/api/ocr/save';
+const SAVE_API_ENDPOINT = import.meta.env.VITE_API_SAVE_ENDPOINT || 'http://localhost:1512/api/ocr/save';
 const USE_MOCK_DATA = import.meta.env.VITE_USE_MOCK_DATA === 'true';
 
 // Log environment variables for debugging
@@ -415,31 +415,129 @@ export default function OCRPage() {
   };
 
   const handleSubmitData = async () => {
-    if (!ocrResults) return;
+    if (!ocrResults) {
+      toast.error('No OCR results to save');
+      return;
+    }
 
     setIsSaving(true);
     try {
+      // Get the current image data as base64
+      const currentImage = files[currentFileIndex];
+      let imageData = null;
+      
+      if (currentImage) {
+        console.log('Processing image for submission:', currentImage.name);
+        
+        // If the image is already in base64 format
+        if (typeof currentImage.preview === 'string' && currentImage.preview.startsWith('data:image')) {
+          console.log('Image is already in base64 format');
+          imageData = currentImage.preview;
+        } else {
+          // Convert the image to base64
+          try {
+            console.log('Converting image to base64');
+            
+            // If current image is a File object
+            if (currentImage instanceof File) {
+              console.log('Image is a File object, reading directly');
+              const reader = new FileReader();
+              imageData = await new Promise((resolve, reject) => {
+                reader.onloadend = () => resolve(reader.result);
+                reader.onerror = () => reject(new Error('Failed to read file'));
+                reader.readAsDataURL(currentImage);
+              });
+            } 
+            // If current image has a preview URL
+            else if (currentImage.preview) {
+              console.log('Image has a preview URL, fetching blob');
+              const response = await fetch(currentImage.preview);
+              if (!response.ok) {
+                throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
+              }
+              const blob = await response.blob();
+              const reader = new FileReader();
+              
+              imageData = await new Promise((resolve, reject) => {
+                reader.onloadend = () => resolve(reader.result);
+                reader.onerror = () => reject(new Error('Failed to read blob'));
+                reader.readAsDataURL(blob);
+              });
+            } else {
+              throw new Error('Invalid image format');
+            }
+            
+            console.log('Successfully converted image to base64');
+          } catch (error) {
+            console.error('Error converting image to base64:', error);
+            toast.error(`Error preparing image: ${error.message}`);
+            // Continue without image data
+            imageData = null;
+          }
+        }
+      }
+
+      console.log('Sending data to:', SAVE_API_ENDPOINT);
+      console.log('Image data included:', imageData ? 'Yes' : 'No');
+      
+      // Make a copy of OCR results to avoid modifying the original
+      const dataToSend = {
+        originalData: ocrResults,
+        editedData: ocrResults, // This will contain any edits made in the table
+        imageIndex: currentFileIndex,
+        imageData: imageData, // Include the base64 image data
+      };
+      
+      // Log the shape of the data being sent without the full image content
+      console.log('Data structure being sent:', {
+        ...dataToSend,
+        imageData: imageData ? `[Base64 string of length ${imageData.length}]` : null
+      });
+      
       const response = await fetch(SAVE_API_ENDPOINT, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${API_TOKEN}`,
         },
-        body: JSON.stringify({
-          originalData: ocrResults,
-          editedData: ocrResults, // This will contain any edits made in the table
-          imageIndex: currentFileIndex,
-        }),
+        body: JSON.stringify(dataToSend),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to save data');
+        let errorMessage = `Server responded with status: ${response.status} ${response.statusText}`;
+        
+        try {
+          const errorText = await response.text();
+          console.error('Server error response:', errorText);
+          
+          // Try to parse as JSON
+          try {
+            const errorJson = JSON.parse(errorText);
+            errorMessage = `Failed to save data: ${errorJson.detail || errorJson.message || errorMessage}`;
+          } catch (parseError) {
+            // If not JSON, use the raw text if it exists
+            if (errorText && errorText.trim()) {
+              errorMessage = `Failed to save data: ${errorText}`;
+            }
+          }
+        } catch (responseError) {
+          console.error('Error reading response:', responseError);
+        }
+        
+        throw new Error(errorMessage);
       }
 
+      const result = await response.json();
+      console.log('Save result:', result);
       toast.success('Data saved successfully!');
+      
+      // If image was saved successfully and has an ID, we could do something with it here
+      if (result && result.id) {
+        console.log(`Invoice saved with ID: ${result.id}`);
+      }
     } catch (error) {
       console.error('Failed to save data:', error);
-      toast.error('Failed to save data. Please try again.');
+      toast.error(`Failed to save: ${error.message || 'Unknown error. Please try again'}`);
     } finally {
       setIsSaving(false);
     }
