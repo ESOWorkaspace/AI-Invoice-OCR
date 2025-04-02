@@ -21,6 +21,9 @@ router.get('/test-connection', ocrController.testConnection);
 // Queue file for asynchronous processing
 router.post('/queue', uploadMiddleware.single('file'), ocrController.queueFileForProcessing);
 
+// Process a previously queued file
+router.post('/process/:fileId', ocrController.processQueuedFile);
+
 // Get file processing status
 router.get('/status/:fileId', ocrController.getFileStatus);
 

@@ -6,25 +6,8 @@ const path = require('path');
 const fs = require('fs');
 const uuid = require('uuid');
 
-// Ensure upload directory exists
-const uploadDir = path.join(__dirname, '../../uploads/invoices');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-// Configure storage
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    // Generate unique filename with original extension
-    const uniqueId = uuid.v4();
-    const timestamp = Date.now();
-    const extname = path.extname(file.originalname);
-    cb(null, `${uniqueId}_${timestamp}${extname}`);
-  }
-});
+// Use memory storage to prevent saving files to disk before save data is pressed
+const storage = multer.memoryStorage();
 
 // File filter to accept only images and PDFs
 const fileFilter = (req, file, cb) => {

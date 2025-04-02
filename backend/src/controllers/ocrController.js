@@ -180,7 +180,7 @@ exports.saveOcrData = async (req, res) => {
     // Process image data if provided
     let binary_image_data = null;
     let image_content_type = null;
-    
+
     if (imageData) {
       try {
         // Check if the image data is a base64 string
@@ -424,26 +424,27 @@ exports.uploadFile = async (req, res) => {
       });
     }
     
-    console.log(`[${requestId}] File received: ${req.file.originalname}`);
+    console.log(`[${requestId}] File received in memory: ${req.file.originalname}, size: ${req.file.size} bytes`);
     
-    // In a real implementation, you would send this file to an OCR service
-    // and process the results. For now, we'll return a simple success response.
+    // File is now in memory (req.file.buffer) and not saved to disk
+    // In real implementation, you would process the buffer directly
     
     res.status(200).json({
       success: true,
       file: {
-        filename: req.file.filename,
         originalname: req.file.originalname,
         size: req.file.size,
-        path: req.file.path
+        mimetype: req.file.mimetype,
+        // No path is returned since file is not saved to disk
+        inMemory: true
       },
-      message: 'File uploaded successfully. Please note that actual OCR processing needs to be implemented.'
+      message: 'File received in memory successfully. Ready for processing when save data is pressed.'
     });
   } catch (error) {
-    console.error(`[${requestId}] Error uploading file:`, error);
+    console.error(`[${requestId}] Error processing uploaded file:`, error);
     res.status(500).json({
       error: {
-        message: 'Error uploading file',
+        message: 'Error processing uploaded file',
         details: error.message
       }
     });
@@ -497,19 +498,22 @@ exports.testConnection = async (req, res) => {
  * Queue a file for OCR processing
  */
 exports.queueFileForProcessing = async (req, res) => {
+  const requestId = uuid.v4().substring(0, 8);
+  console.log(`[${requestId}] Queueing file for OCR processing`);
+  
   try {
     // Validasi file exists
     if (!req.file) {
-      return res.status(400).json({ error: 'File not provided' });
+      return res.status(400).json({ 
+        error: 'File not provided' 
+      });
     }
     
-    console.log('Received request to queue file:', req.file.originalname);
+    console.log(`[${requestId}] Received file for queue: ${req.file.originalname}, size: ${req.file.size} bytes`);
     
     // Validasi file type
     const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'];
     if (!allowedTypes.includes(req.file.mimetype)) {
-      // Hapus file jika tipe tidak valid
-      fs.unlinkSync(req.file.path);
       return res.status(400).json({ 
         error: 'Invalid file type. Only JPEG, JPG, PNG, and PDF files are allowed.'
       });
@@ -518,27 +522,29 @@ exports.queueFileForProcessing = async (req, res) => {
     // Validasi file size (max 25MB)
     const maxSize = 25 * 1024 * 1024;
     if (req.file.size > maxSize) {
-      // Hapus file jika ukuran melebihi limit
-      fs.unlinkSync(req.file.path);
       return res.status(400).json({ 
         error: 'File size too large. Maximum allowed size is 25MB.'
       });
     }
     
-    // Tambahkan ke antrian untuk diproses tanpa konversi apapun
-    // File disimpan apa adanya dan akan dikirim ke OCR API oleh queueService
-    const fileId = queueService.queueFile(req.file.path, req.file.originalname);
+    // Instead of passing the path, we pass the buffer from memory
+    // The file is not saved to disk until save data is clicked
+    const fileId = queueService.queueBuffer(req.file.buffer, req.file.originalname, req.file.mimetype);
     
     res.status(200).json({ 
-      message: 'File added to processing queue', 
-      fileId: fileId 
+      success: true,
+      fileId: fileId,
+      message: 'File added to processing queue. It will be processed when save data is clicked.' 
     });
     
-    console.log(`File queued successfully with ID: ${fileId}`);
+    console.log(`[${requestId}] File queued successfully with ID: ${fileId}`);
     
   } catch (error) {
-    console.error('Error in queueFileForProcessing:', error);
-    res.status(500).json({ error: 'Failed to queue file for processing' });
+    console.error(`[${requestId}] Error queueing file:`, error);
+    res.status(500).json({ 
+      error: 'Failed to queue file for processing',
+      details: error.message
+    });
   }
 };
 
@@ -560,6 +566,76 @@ exports.getFileStatus = async (req, res) => {
         message: 'Error getting file status',
         details: error.message
       }
+    });
+  }
+};
+
+/**
+ * Trigger processing of a queued file
+ */
+exports.processQueuedFile = async (req, res) => {
+  const requestId = uuid.v4().substring(0, 8);
+  const { fileId } = req.params;
+  
+  if (!fileId) {
+    return res.status(400).json({
+      success: false,
+      message: 'File ID is required'
+    });
+  }
+  
+  console.log(`[${requestId}] Processing queued file with ID: ${fileId}`);
+  
+  try {
+    // Check if file exists in queue
+    const status = queueService.getFileStatus(fileId);
+    
+    if (status.status === 'not_found') {
+      return res.status(404).json({
+        success: false,
+        message: 'File not found in queue'
+      });
+    }
+    
+    if (status.status === 'processing') {
+      return res.status(409).json({
+        success: false,
+        message: 'File is already being processed',
+        status
+      });
+    }
+    
+    if (status.status === 'completed') {
+      return res.status(200).json({
+        success: true,
+        message: 'File has already been processed',
+        result: status.result
+      });
+    }
+    
+    // Process the file
+    queueService.processQueuedFile(fileId)
+      .then(result => {
+        console.log(`[${requestId}] File processed successfully`);
+      })
+      .catch(error => {
+        console.error(`[${requestId}] Error processing file:`, error);
+      });
+    
+    // Return immediately with status "processing" to allow async processing
+    res.status(202).json({
+      success: true,
+      message: 'File processing started',
+      fileId,
+      status: 'processing'
+    });
+    
+  } catch (error) {
+    console.error(`[${requestId}] Error starting file processing:`, error);
+    res.status(500).json({
+      success: false,
+      message: 'Error starting file processing',
+      error: error.message
     });
   }
 };
