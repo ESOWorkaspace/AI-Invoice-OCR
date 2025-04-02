@@ -3,6 +3,11 @@
 .env.*
 !.env.example
 
+# Configuration files with secrets
+config/config.json
+backend/config/config.json
+config.json
+
 # Python virtual environments
 .venv/
 venv/
@@ -86,6 +91,17 @@ coverage/
 tmp/
 temp/
 
+# Uploaded files
+backend/uploads/temp/*
+backend/uploads/invoices/*
+!backend/uploads/temp/.gitkeep
+!backend/uploads/invoices/.gitkeep
+
+# Cursor-specific directories
+.cursor/
+
+# Project specific
+mockup_data/
 
 # windsurf rules
 .windsurfrules

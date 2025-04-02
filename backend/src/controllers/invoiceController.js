@@ -154,6 +154,24 @@ exports.createInvoice = async (req, res) => {
       });
     }
     
+    // Process image data if sent as base64 string
+    if (req.body.image_data) {
+      // Extract content type and binary data
+      const image_data_parts = req.body.image_data.split(';base64,');
+      if (image_data_parts.length === 2) {
+        const content_type_part = image_data_parts[0];
+        const base64_data = image_data_parts[1];
+        
+        // Extract content type (e.g., 'image/jpeg')
+        req.body.image_content_type = content_type_part.replace('data:', '');
+        
+        // Decode base64 to binary
+        req.body.image_data = Buffer.from(base64_data, 'base64');
+        
+        console.log(`[${requestId}] Processed image data from base64, size: ${req.body.image_data.length} bytes`);
+      }
+    }
+    
     // Create new invoice
     const newInvoice = await ProcessedInvoice.create(req.body);
     console.log(`[${requestId}] Created new invoice with ID: ${newInvoice.id}`);
@@ -191,9 +209,9 @@ exports.updateInvoice = async (req, res) => {
       });
     }
     
-    // Handle binary image data if provided
+    // Process image data if sent as base64 string
     if (req.body.image_data) {
-      // Extract content type and binary data from base64 string
+      // Extract content type and binary data
       const image_data_parts = req.body.image_data.split(';base64,');
       if (image_data_parts.length === 2) {
         const content_type_part = image_data_parts[0];
@@ -205,7 +223,7 @@ exports.updateInvoice = async (req, res) => {
         // Decode base64 to binary
         req.body.image_data = Buffer.from(base64_data, 'base64');
         
-        console.log(`[${requestId}] Processed image data, size: ${req.body.image_data.length} bytes`);
+        console.log(`[${requestId}] Processed image data from base64, size: ${req.body.image_data.length} bytes`);
       }
     }
     

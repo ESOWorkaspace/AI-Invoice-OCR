@@ -193,7 +193,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:1512
 const API_TOKEN = import.meta.env.VITE_API_OCR_AUTH_TOKEN || 'a3f5d6e8b9c0a1b2d3e4f5g6h7i8j9k0l1m2n3o4p5q6r7s8';
   
 // Buat endpoint dari base URL
-const OCR_API_ENDPOINT = import.meta.env.OCR_API_ENDPOINT || 'http://amien-server:1880/testingupload';
+const OCR_API_ENDPOINT = import.meta.env.VITE_API_OCR_PROCESS_FILE || 'http://amien-server:1880/testingupload';
 const QUEUE_API_ENDPOINT = `${API_BASE_URL}/api/ocr/queue`;
 const STATUS_API_ENDPOINT = `${API_BASE_URL}/api/ocr/status`;
 const SAVE_API_ENDPOINT = `${API_BASE_URL}/api/ocr/save`;
@@ -325,14 +325,8 @@ export default function OCRPage() {
                 updatedFromServer: true
               });
             } else {
-              // Jika tidak ada info file, tambahkan dengan info minimal
-              updatedQueue.push({
-                id: serverStatus.id,
-                name: serverStatus.result?.filename || 'Unknown File',
-                status: serverStatus.status,
-                progress: serverStatus.progress || 0,
-                updatedFromServer: true
-              });
+              // Skip unknown files that don't have corresponding entries in fileDataMap
+              console.log(`Skipping unknown file ID: ${serverStatus.id} (not in current session)`);
             }
           }
         });
@@ -418,16 +412,19 @@ export default function OCRPage() {
                     toast.success(`File ${serverStatus.result.filename} berhasil diproses dan tersedia di daftar hasil`);
                   }
                 }
+              } else {
+                // Skip processing for unknown files
+                console.log(`Skipping processing for unknown file ID: ${fileId} (not in current session)`);
               }
-              
-              // Remove from queue after processing is complete (dengan delay)
-              if (queueItem.status === 'completed') {
-                setTimeout(() => {
-                  setProcessingQueue(currentQueue => 
-                    currentQueue.filter(item => item.id !== queueItem.id)
-                  );
-                }, 3000); // Keep in queue for 3 seconds so user can see it completed
-              }
+            }
+            
+            // Remove from queue after processing is complete (dengan delay)
+            if (queueItem.status === 'completed') {
+              setTimeout(() => {
+                setProcessingQueue(currentQueue => 
+                  currentQueue.filter(item => item.id !== queueItem.id)
+                );
+              }, 3000); // Keep in queue for 3 seconds so user can see it completed
             }
           } else if (queueItem.status === 'error') {
             // Handle error dengan menampilkan toast
@@ -706,6 +703,41 @@ export default function OCRPage() {
     
     if (queuedFiles.length > 0) {
       toast.success('File sudah dalam proses pemrosesan asinkron');
+      
+      // Trigger processing for any queued files that haven't been processed yet
+      for (const queueItem of queuedFiles.filter(item => item.status === 'queued')) {
+        try {
+          console.log(`Triggering processing for queued file ID: ${queueItem.id}`);
+          
+          // Call the /process/:fileId endpoint to start processing
+          const response = await fetch(`${API_BASE_URL}/api/ocr/process/${queueItem.id}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': API_TOKEN
+            }
+          });
+          
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`Error triggering processing for file ${queueItem.id}: ${errorText}`);
+            toast.error(`Gagal memproses file: ${response.status}`);
+          } else {
+            const result = await response.json();
+            console.log(`Processing triggered for file ${queueItem.id}`, result);
+            toast.info(`Memproses file ${queueItem.name}...`);
+            
+            // Update status in UI immediately
+            setProcessingQueue(prev => prev.map(item => 
+              item.id === queueItem.id ? {...item, status: 'processing', progress: 5} : item
+            ));
+          }
+        } catch (error) {
+          console.error(`Error triggering processing for file ${queueItem.id}:`, error);
+          toast.error(`Gagal memproses file: ${error.message}`);
+        }
+      }
+      
       return;
     }
 
@@ -821,6 +853,36 @@ export default function OCRPage() {
                 
                 toast.success(`File ${file.name} ditambahkan ke antrian pemrosesan`);
                 success = true;
+                
+                // Immediately trigger processing for this file
+                try {
+                  console.log(`Triggering processing for file ID: ${fileId}`);
+                  
+                  const processResponse = await fetch(`${API_BASE_URL}/api/ocr/process/${fileId}`, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': API_TOKEN
+                    }
+                  });
+                  
+                  if (!processResponse.ok) {
+                    const processErrorText = await processResponse.text();
+                    console.error(`Error triggering processing for file ${fileId}: ${processErrorText}`);
+                    // Don't show toast for this error as the file is still queued
+                  } else {
+                    const processResult = await processResponse.json();
+                    console.log(`Processing triggered for file ${fileId}`, processResult);
+                    
+                    // Update status in UI immediately
+                    setProcessingQueue(prev => prev.map(item => 
+                      item.id === fileId ? {...item, status: 'processing', progress: 5} : item
+                    ));
+                  }
+                } catch (processError) {
+                  console.error(`Error triggering processing for file ${fileId}:`, processError);
+                  // Don't show toast for this error as the file is still queued
+                }
               } else {
                 throw new Error(`Server tidak mengembalikan fileId`);
               }
@@ -1029,7 +1091,7 @@ export default function OCRPage() {
   };
 
   return (
-    <div className="w-full h-full">
+    <div className="w-full h-full text-black">
       <div className="w-full h-full flex flex-col">
         <main className="flex-1 w-full px-6 overflow-y-auto">
           <div className="w-full max-w-7xl mx-auto">
