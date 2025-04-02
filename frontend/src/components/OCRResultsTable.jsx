@@ -71,6 +71,12 @@ export default function OCRResultsTable({ data, onDataChange }) {
             item.nama_barang_main.from_database = true;
           }
           
+          if (!item.satuan_main) {
+            item.satuan_main = { value: "", is_confident: true, from_database: true };
+          } else {
+            item.satuan_main.from_database = true;
+          }
+          
           if (!item.harga_jual_main) {
             item.harga_jual_main = { value: 0, is_confident: true, from_database: true };
           } else {
@@ -166,11 +172,37 @@ export default function OCRResultsTable({ data, onDataChange }) {
 
   const handleHeaderChange = (field, value) => {
     const newData = { ...editableData };
+    
+    // Store the field name for the date picker component
+    if (newData.output[field]) {
+      newData.output[field]._fieldName = field;
+    }
+    
+    // Update the value
     newData.output[field] = {
       ...newData.output[field],
       value: value,
-      is_confident: true
+      is_confident: true,
+      _fieldName: field  // Store field name for reference in renderDatePicker
     };
+    
+    // Validate dates if this is a date field
+    if (field === 'tanggal_faktur' || field === 'tgl_jatuh_tempo') {
+      const invoiceDateValue = parseDate(newData.output.tanggal_faktur?.value);
+      const dueDateValue = parseDate(newData.output.tgl_jatuh_tempo?.value);
+      
+      // Only validate if both dates exist
+      if (invoiceDateValue && dueDateValue) {
+        if (invoiceDateValue > dueDateValue) {
+          // Show warning but don't prevent the change
+          console.warn('Tanggal faktur tidak boleh lebih dari tanggal jatuh tempo');
+          
+          // You can add a toast notification here if desired
+          // toast.warning('Tanggal faktur tidak boleh lebih dari tanggal jatuh tempo');
+        }
+      }
+    }
+    
     setEditableData(newData);
     onDataChange(newData);
   };
@@ -378,6 +410,28 @@ export default function OCRResultsTable({ data, onDataChange }) {
       }
     }
     
+    // Get the field name from the parent object keys
+    const fieldName = data._fieldName || '';
+    
+    // Create constraints for date validation
+    let minDate = undefined;
+    let maxDate = undefined;
+    
+    // Add validation constraints based on field name
+    if (fieldName === 'tanggal_jatuh_tempo' && editableData?.output?.tanggal_faktur?.value) {
+      // If this is due date, ensure it's not before invoice date
+      const invoiceDateValue = parseDate(editableData.output.tanggal_faktur.value);
+      if (invoiceDateValue) {
+        minDate = invoiceDateValue;
+      }
+    } else if (fieldName === 'tanggal_faktur' && editableData?.output?.tgl_jatuh_tempo?.value) {
+      // If this is invoice date, ensure it's not after due date
+      const dueDateValue = parseDate(editableData.output.tgl_jatuh_tempo.value);
+      if (dueDateValue) {
+        maxDate = dueDateValue;
+      }
+    }
+    
     // Create a unique ID for this date picker
     const datePickerId = `date-picker-${Math.random().toString(36).substring(2, 10)}`;
     
@@ -441,6 +495,8 @@ export default function OCRResultsTable({ data, onDataChange }) {
           showYearDropdown
           dropdownMode="select"
           placeholderText="DD-MM-YYYY"
+          minDate={minDate}
+          maxDate={maxDate}
           popperProps={{
             positionFixed: true,
             modifiers: [
@@ -571,6 +627,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
     { id: 'nama_barang_main', header: 'Nama Main', width: 250, sticky: true, left: 160 },
     { id: 'qty', header: 'Qty', width: 80, type: 'currency', align: 'right' },
     { id: 'satuan', header: 'Satuan', width: 80, align: 'center' },
+    { id: 'satuan_main', header: 'SATUAN MAIN', width: 120, align: 'center', special: 'database' },
     { id: 'harga_satuan', header: 'Harga Satuan', width: 120, type: 'currency', align: 'right' },
     { id: 'harga_bruto', header: 'Harga Bruto', width: 120, type: 'currency', align: 'right' },
     { id: 'diskon_persen', header: 'Diskon %', width: 100, type: 'percentage', align: 'right' },

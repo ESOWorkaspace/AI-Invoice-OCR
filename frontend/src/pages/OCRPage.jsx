@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import toast from 'react-hot-toast'
 import FileUpload from '../components/FileUpload'
 import FileList from '../components/FileList'
@@ -12,7 +12,6 @@ import ErrorModal from '../components/ErrorModal'
 const mockData = [
   {
     jatuh_tempo_epoch: "1741132800",
-    is_confident: true,
     tanggal_faktur_epoch: "1740528000",
     is_confident: true,
     output: {
@@ -189,367 +188,844 @@ const mockData = [
   }
 ];
 
-// API endpoint configuration
-const API_ENDPOINT = import.meta.env.VITE_API_OCR_PROCESS_FILE || 'http://amien-server:1880/testingupload';
+// API Configuration
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:1512';
 const API_TOKEN = import.meta.env.VITE_API_OCR_AUTH_TOKEN || 'a3f5d6e8b9c0a1b2d3e4f5g6h7i8j9k0l1m2n3o4p5q6r7s8';
-const SAVE_API_ENDPOINT = import.meta.env.VITE_API_SAVE_ENDPOINT || 'http://localhost:1512/api/ocr/save';
-const USE_MOCK_DATA = import.meta.env.VITE_USE_MOCK_DATA === 'true';
-
-// Log environment variables for debugging
-console.log('Environment Variables:', {
-  API_ENDPOINT,
-  API_TOKEN,
+  
+// Buat endpoint dari base URL
+const OCR_API_ENDPOINT = import.meta.env.OCR_API_ENDPOINT || 'http://amien-server:1880/testingupload';
+const QUEUE_API_ENDPOINT = `${API_BASE_URL}/api/ocr/queue`;
+const STATUS_API_ENDPOINT = `${API_BASE_URL}/api/ocr/status`;
+const SAVE_API_ENDPOINT = `${API_BASE_URL}/api/ocr/save`;
+  
+console.log('API Configuration:', {
+  API_BASE_URL,
+  OCR_API_ENDPOINT,
+  QUEUE_API_ENDPOINT,
+  STATUS_API_ENDPOINT,
   SAVE_API_ENDPOINT,
-  DEV: import.meta.env.DEV,
-  USE_MOCK_DATA
+  API_TOKEN: API_TOKEN ? '***' : 'undefined' // Tidak menampilkan token utuh
 });
 
 export default function OCRPage() {
-  const [files, setFiles] = useState([])
-  const [currentFileIndex, setCurrentFileIndex] = useState(0)
-  const [rotation, setRotation] = useState(0)
-  const [isProcessing, setIsProcessing] = useState(false)
-  const [isSaving, setIsSaving] = useState(false)
-  const [ocrResults, setOcrResults] = useState(null)
-  // New state to store OCR results for each file
-  const [ocrResultsMap, setOcrResultsMap] = useState({})
-  // State for error modal
-  const [errorModalOpen, setErrorModalOpen] = useState(false)
-  const [errorMessage, setErrorMessage] = useState('')
+  const [files, setFiles] = useState([]);
+  const [currentFileIndex, setCurrentFileIndex] = useState(0);
+  const [rotation, setRotation] = useState(0);
   
-  const resultsRef = useRef(null)
+  // State untuk data OCR dan proses
+  const [ocrResults, setOcrResults] = useState(null);
+  const [data, setData] = useState([]);
+  const [ocrResultsMap, setOcrResultsMap] = useState({});
+  
+  // State untuk loading dan proses
+  const [isUploading, setIsUploading] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  
+  // State untuk antrian pemrosesan asinkron
+  const [processingQueue, setProcessingQueue] = useState([]);
+  const [statusPollingActive, setStatusPollingActive] = useState(false); // State untuk status polling
+  const [processedResults, setProcessedResults] = useState([]);
+  const [fileDataMap, setFileDataMap] = useState({});
+  
+  const [nomorReferensi, setNomorReferensi] = useState("");
+  const [namaSupplier, setNamaSupplier] = useState("");
+  const [tglJatuhTempo, setTglJatuhTempo] = useState("");
+  const [tanggalFaktur, setTanggalFaktur] = useState("");
+  
+  // State untuk error modal
+  const [errorModalOpen, setErrorModalOpen] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  
+  const resultsRef = useRef(null);
 
-  const handleFilesUploaded = (newFiles) => {
-    setFiles(prev => [...prev, ...newFiles])
-    if (files.length === 0) {
-      setCurrentFileIndex(0)
+  // Status polling interval
+  useEffect(() => {
+    const statusInterval = setInterval(() => {
+      updateFileStatuses();
+    }, 2000);
+    
+    return () => clearInterval(statusInterval);
+  }, [processingQueue]);
+  
+  // Update statuses for all queued files
+  const updateFileStatuses = async () => {
+    if (processingQueue.length === 0) return;
+    
+    try {
+      console.log(`Fetching file statuses from: ${STATUS_API_ENDPOINT}`);
+      
+      // Gunakan endpoint yang benar dengan URL lengkap
+      const response = await fetch(STATUS_API_ENDPOINT, {
+        headers: {
+          Authorization: API_TOKEN,
+          'Accept': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        console.error(`Error fetching statuses: ${response.status}`);
+        return; // Keluar dari fungsi jika terjadi error
+      }
+      
+      let data;
+      try {
+        data = await response.json();
+        console.log("Status response data:", data);
+      } catch (err) {
+        console.error(`Failed to parse status response: ${err.message}`);
+        return;
+      }
+      
+      if (data && Array.isArray(data.statuses)) {
+        console.log(`Received ${data.statuses.length} status items`);
+        
+        // Buat map dari statuses untuk lookup yang lebih efisien
+        const statusMap = new Map();
+        data.statuses.forEach(status => {
+          statusMap.set(status.id, status);
+        });
+        
+        // Update queue dengan status terbaru dari server
+        const updatedQueue = processingQueue.map(queueItem => {
+          const serverStatus = statusMap.get(queueItem.id);
+          
+          // Jika status ditemukan di server, update item queue
+          if (serverStatus) {
+            return {
+              ...queueItem,
+              status: serverStatus.status,
+              progress: serverStatus.progress || 0,
+              // Tambahkan flag untuk tracking
+              updatedFromServer: true
+            };
+          }
+          
+          // Jika tidak ditemukan di server, pertahankan status saat ini
+          return queueItem;
+        });
+        
+        // Tambahkan status baru yang belum ada di queue
+        data.statuses.forEach(serverStatus => {
+          const existingIndex = updatedQueue.findIndex(item => item.id === serverStatus.id);
+          
+          // Jika status tidak ada di queue, tambahkan
+          if (existingIndex === -1) {
+            // Cari info file dari fileDataMap
+            const fileInfo = fileDataMap[serverStatus.id];
+            
+            if (fileInfo) {
+              updatedQueue.push({
+                id: serverStatus.id,
+                name: fileInfo.fileName || 'Unknown File',
+                status: serverStatus.status,
+                progress: serverStatus.progress || 0,
+                fileIndex: fileInfo.fileIndex,
+                updatedFromServer: true
+              });
+            } else {
+              // Jika tidak ada info file, tambahkan dengan info minimal
+              updatedQueue.push({
+                id: serverStatus.id,
+                name: serverStatus.result?.filename || 'Unknown File',
+                status: serverStatus.status,
+                progress: serverStatus.progress || 0,
+                updatedFromServer: true
+              });
+            }
+          }
+        });
+        
+        // Proses hasil OCR untuk file yang sudah selesai
+        updatedQueue.forEach(queueItem => {
+          if (queueItem.status === 'completed') {
+            const serverStatus = statusMap.get(queueItem.id);
+            
+            if (serverStatus && serverStatus.result) {
+              // Handle completed file with OCR results
+              let ocrData = serverStatus.result.ocrData;
+              const fileId = serverStatus.id;
+              
+              console.log(`Processing completed OCR data for ${fileId}`);
+              
+              // Validasi dan normalisasi struktur data OCR
+              if (!ocrData) {
+                console.warn(`OCR data missing for file ${fileId}`);
+                ocrData = { output: { items: [] } };
+              } else if (!ocrData.output) {
+                console.warn(`OCR data missing output property for file ${fileId}`);
+                ocrData.output = { items: [] };
+              } else if (!ocrData.output.items) {
+                console.warn(`OCR data missing items array for file ${fileId}`);
+                ocrData.output.items = [];
+              } else if (!Array.isArray(ocrData.output.items)) {
+                console.warn(`OCR data items is not an array for file ${fileId}`);
+                ocrData.output.items = [];
+              }
+              
+              // Get file information for correlation
+              const fileInfo = fileDataMap[fileId];
+              
+              if (fileInfo) {
+                console.log(`Found file info for ${fileId}, fileIndex: ${fileInfo.fileIndex}`);
+                
+                // Mark file as processed
+                setFileDataMap(prev => ({
+                  ...prev,
+                  [fileId]: {
+                    ...prev[fileId],
+                    processed: true,
+                    ocrData: ocrData
+                  }
+                }));
+                
+                // Store OCR results in the map
+                const fileIndex = fileInfo.fileIndex;
+                setOcrResultsMap(prev => ({
+                  ...prev,
+                  [fileIndex]: ocrData
+                }));
+                
+                // If this is the current file, set it as active
+                if (currentFileIndex === fileIndex) {
+                  console.log(`This is the current active file (index: ${fileIndex}), loading OCR data`);
+                  setOcrResults(ocrData);
+                  loadOcrData(ocrData);
+                  setIsDataLoaded(true);
+                  toast.success(`File ${serverStatus.result.filename} berhasil diproses!`);
+                } else {
+                  // Hindari duplikasi dengan memeriksa apakah file sudah ada di daftar hasil
+                  const isDuplicate = processedResults.some(
+                    item => item.fileIndex === fileInfo.fileIndex && 
+                           item.filename === serverStatus.result.filename
+                  );
+                  
+                  if (!isDuplicate) {
+                    console.log(`Adding file ${serverStatus.result.filename} to processed results list`);
+                    // Add to processed results for later use with a unique identifier
+                    setProcessedResults(prev => [
+                      ...prev, 
+                      { 
+                        id: `${serverStatus.id}-${Date.now()}`, // Ensure unique ID dengan timestamp
+                        filename: serverStatus.result.filename,
+                        fileIndex: fileInfo.fileIndex,
+                        data: ocrData,
+                        processedAt: serverStatus.result.processedAt
+                      }
+                    ]);
+                    
+                    toast.success(`File ${serverStatus.result.filename} berhasil diproses dan tersedia di daftar hasil`);
+                  }
+                }
+              }
+              
+              // Remove from queue after processing is complete (dengan delay)
+              if (queueItem.status === 'completed') {
+                setTimeout(() => {
+                  setProcessingQueue(currentQueue => 
+                    currentQueue.filter(item => item.id !== queueItem.id)
+                  );
+                }, 3000); // Keep in queue for 3 seconds so user can see it completed
+              }
+            }
+          } else if (queueItem.status === 'error') {
+            // Handle error dengan menampilkan toast
+            const serverStatus = statusMap.get(queueItem.id);
+            if (serverStatus && serverStatus.result) {
+              toast.error(`Error memproses file: ${serverStatus.result.message || 'Unknown error'}`);
+            }
+            
+            // Remove from queue after error (dengan delay)
+            setTimeout(() => {
+              setProcessingQueue(currentQueue => 
+                currentQueue.filter(item => item.id !== queueItem.id)
+              );
+            }, 5000); // Keep error in queue for 5 seconds
+          }
+        });
+        
+        // Update queue state
+        setProcessingQueue(updatedQueue);
+      } else {
+        console.warn('Invalid status response format:', data);
+      }
+    } catch (error) {
+      console.error('Error fetching file statuses:', error);
     }
-    toast.success(`${newFiles.length} file(s) uploaded successfully`)
-  }
+  };
+  
+  // Load OCR data into editable state
+  const loadOcrData = (ocrData) => {
+    console.log("Loading OCR data into editable state:", ocrData);
+    
+    if (!ocrData || !ocrData.output) {
+      console.warn("Invalid OCR data structure, cannot load");
+      return;
+    }
+    
+    // Set invoice header fields
+    if (ocrData.output.nomor_referensi) {
+      setNomorReferensi(ocrData.output.nomor_referensi.value || "");
+    }
+    
+    if (ocrData.output.nama_supplier) {
+      setNamaSupplier(ocrData.output.nama_supplier.value || "");
+    }
+    
+    if (ocrData.output.tgl_jatuh_tempo) {
+      setTglJatuhTempo(ocrData.output.tgl_jatuh_tempo.value || "");
+    }
+    
+    if (ocrData.output.tanggal_faktur) {
+      setTanggalFaktur(ocrData.output.tanggal_faktur.value || "");
+    }
+    
+    // Set invoice items
+    if (Array.isArray(ocrData.output.items)) {
+      // Make sure items have all required fields for editing
+      const normalizedItems = ocrData.output.items.map(item => {
+        // Create a normalized item with defaults for missing properties
+        return {
+          kode_barang_invoice: ensureProperty(item.kode_barang_invoice),
+          nama_barang_invoice: ensureProperty(item.nama_barang_invoice),
+          kode_barang_main: ensureProperty(item.kode_barang_main),
+          nama_barang_main: ensureProperty(item.nama_barang_main),
+          qty: ensureProperty(item.qty),
+          satuan: ensureProperty(item.satuan),
+          harga_satuan: ensureProperty(item.harga_satuan),
+          harga_bruto: ensureProperty(item.harga_bruto),
+          diskon_persen: ensureProperty(item.diskon_persen),
+          diskon_rp: ensureProperty(item.diskon_rp),
+          jumlah_netto: ensureProperty(item.jumlah_netto),
+          ppn: ensureProperty(item.ppn),
+          margin_persen: ensureProperty(item.margin_persen, ""),
+          margin_rp: ensureProperty(item.margin_rp, ""),
+          kenaikan_persen: ensureProperty(item.kenaikan_persen, 0),
+          kenaikan_rp: ensureProperty(item.kenaikan_rp, 0),
+          saran_margin_persen: ensureProperty(item.saran_margin_persen, 0),
+          saran_margin_rp: ensureProperty(item.saran_margin_rp, 0)
+        };
+      });
+      
+      console.log(`Setting ${normalizedItems.length} normalized items`);
+      setData(normalizedItems);
+    } else {
+      console.warn("Missing or invalid items array in OCR data");
+      setData([]);
+    }
+  };
+  
+  // Helper function to ensure property exists with value and is_confident
+  const ensureProperty = (prop, defaultValue = "") => {
+    if (!prop) {
+      return { value: defaultValue, is_confident: false };
+    }
+    if (typeof prop === 'object' && 'value' in prop) {
+      return prop;
+    }
+    return { value: prop, is_confident: true };
+  };
 
-  const handleFileSelect = (index) => {
-    setCurrentFileIndex(index)
-    setRotation(0) // Reset rotation when switching files
-    // Load OCR results for selected image if they exist
-    const resultsForSelectedImage = ocrResultsMap[index];
-    setOcrResults(resultsForSelectedImage || null)
-  }
+  // Handle file change
+  const handleFileChange = (index) => {
+    if (index >= 0 && index < files.length) {
+      setCurrentFileIndex(index);
+      setRotation(0);
+      
+      // Check if OCR results exist for this file
+      const fileOcrResults = ocrResultsMap[index];
+      if (fileOcrResults) {
+        setOcrResults(fileOcrResults);
+        loadOcrData(fileOcrResults);
+        setIsDataLoaded(true);
+      } else {
+        // Reset OCR results if no data available for this file
+        setOcrResults(null);
+        setIsDataLoaded(false);
+      }
+    }
+  };
 
+  // Handle file delete
   const handleFileDelete = (index) => {
-    setFiles(prev => {
-      const newFiles = prev.filter((_, i) => i !== index)
-      // Adjust current index if needed
-      if (index <= currentFileIndex && currentFileIndex > 0) {
-        setCurrentFileIndex(currentFileIndex - 1)
+    if (index < 0 || index >= files.length) return;
+    
+    // Get the file to be deleted
+    const fileToDelete = files[index];
+    
+    // Find any associated fileId in the fileDataMap
+    let fileIdToDelete = null;
+    Object.entries(fileDataMap).forEach(([fileId, data]) => {
+      if (data.fileIndex === index) {
+        fileIdToDelete = fileId;
       }
-      if (newFiles.length === 0) {
-        setCurrentFileIndex(0)
-        setRotation(0)
-        setOcrResults(null)
-        setOcrResultsMap({})
+    });
+    
+    // Remove file from files array
+    const newFiles = [...files];
+    newFiles.splice(index, 1);
+    setFiles(newFiles);
+    
+    // Update current file index if needed
+    if (newFiles.length === 0) {
+      setCurrentFileIndex(0);
+      setRotation(0);
+      setOcrResults(null);
+      setIsDataLoaded(false); // Gunakan state yang sudah ditambahkan
+    } else if (currentFileIndex >= index) {
+      // If we're deleting the current file or one before it, adjust the index
+      const newIndex = Math.max(0, currentFileIndex - 1);
+      setCurrentFileIndex(newIndex);
+      
+      // Load OCR results for the new current file if available
+      const newFileOcrResults = ocrResultsMap[newIndex];
+      if (newFileOcrResults) {
+        setOcrResults(newFileOcrResults);
+        loadOcrData(newFileOcrResults);
+        setIsDataLoaded(true);
+      } else {
+        setOcrResults(null);
+        setIsDataLoaded(false);
       }
-      toast.success('File deleted successfully')
-      return newFiles
-    })
-  }
+    }
+    
+    // Clean up OCR results map
+    const newOcrResultsMap = { ...ocrResultsMap };
+    delete newOcrResultsMap[index];
+    
+    // Reindex the OCR results map for files after the deleted one
+    const updatedOcrResultsMap = {};
+    Object.keys(newOcrResultsMap).forEach(key => {
+      const keyNum = parseInt(key);
+      if (keyNum > index) {
+        updatedOcrResultsMap[keyNum - 1] = newOcrResultsMap[keyNum];
+      } else {
+        updatedOcrResultsMap[keyNum] = newOcrResultsMap[keyNum];
+      }
+    });
+    
+    setOcrResultsMap(updatedOcrResultsMap);
+    
+    // Remove from fileDataMap if found
+    if (fileIdToDelete) {
+      const newFileDataMap = { ...fileDataMap };
+      delete newFileDataMap[fileIdToDelete];
+      setFileDataMap(newFileDataMap);
+      
+      // Remove from processing queue if it exists
+      setProcessingQueue(prev => prev.filter(item => item.id !== fileIdToDelete));
+    }
+    
+    // Remove from processed results if it exists
+    setProcessedResults(prev => prev.filter(item => 
+      item.fileIndex !== index
+    ));
+    
+    toast.success(`File "${fileToDelete.name}" berhasil dihapus`);
+  };
 
+  // Handle next image navigation
+  const handleNextImage = () => {
+    if (currentFileIndex < files.length - 1) {
+      handleFileChange(currentFileIndex + 1);
+    }
+  };
+
+  // Handle previous image navigation
+  const handlePrevImage = () => {
+    if (currentFileIndex > 0) {
+      handleFileChange(currentFileIndex - 1);
+    }
+  };
+
+  // Handle file upload
+  const handleFileUpload = async (acceptedFiles) => {
+    if (acceptedFiles.length === 0) return;
+    
+    try {
+      setIsUploading(true);
+      
+      // Filter files untuk tipe yang didukung
+      const validFiles = acceptedFiles.filter(file => {
+        const fileType = file.type.toLowerCase();
+        const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'];
+        const isValidType = validTypes.includes(fileType);
+        const isValidSize = file.size <= 25 * 1024 * 1024; // 25MB limit
+        
+        if (!isValidType) {
+          toast.error(`File ${file.name} ditolak: Hanya file .jpeg, .jpg, .png, dan .pdf yang diperbolehkan.`);
+        } else if (!isValidSize) {
+          toast.error(`File ${file.name} ditolak: Ukuran file maksimal 25MB.`);
+        }
+        
+        return isValidType && isValidSize;
+      });
+      
+      if (validFiles.length === 0) {
+        setIsUploading(false);
+        return;
+      }
+      
+      // Tambahkan semua file ke daftar files terlebih dahulu
+      const newFiles = [...files];
+      const fileStartIndex = newFiles.length;
+      
+      // Tambahkan semua file ke state
+      validFiles.forEach(file => newFiles.push(file));
+      setFiles(newFiles);
+      
+      // Set file yang baru diupload sebagai aktif
+      if (validFiles.length > 0 && newFiles.length > 0) {
+        setCurrentFileIndex(fileStartIndex);
+      }
+      
+      // Tambahkan file ke daftar saja tanpa langsung mengantrian untuk diproses
+      // File akan diproses ketika tombol "Process File" diklik
+      toast.success(`${validFiles.length} file berhasil diunggah. Klik "Process File" untuk memproses.`);
+      setIsUploading(false);
+    } catch (error) {
+      console.error('Error in file upload:', error);
+      toast.error('Terjadi kesalahan saat upload file');
+      setIsUploading(false);
+    }
+  };
+
+  // Fungsi handleProcessFile untuk legacy mode
   const handleProcessFile = async () => {
+    // Jika tidak ada file, tampilkan error
     if (!files || files.length === 0) {
-      toast.error('Please upload a file first');
+      toast.error('Silakan upload file terlebih dahulu');
+      return;
+    }
+
+    // If files are already in the queue but not being processed, just show a notification
+    const queuedFiles = processingQueue.filter(item => 
+      item.status === 'queued' || item.status === 'processing'
+    );
+    
+    if (queuedFiles.length > 0) {
+      toast.success('File sudah dalam proses pemrosesan asinkron');
       return;
     }
 
     setIsProcessing(true);
     
     try {
-      // Create a FormData object to send all files
-      const formData = new FormData();
+      // Tambahkan file yang ada ke antrian pemrosesan
+      const filesToProcess = [];
       
-      // Add all uploaded files to the FormData
-      files.forEach((file, index) => {
-        formData.append('file', file);
-      });
-      
-      let data;
-      let useBackend = true;
-      
-      // Check if we're in development mode and should use mock data
-      if (import.meta.env.DEV && USE_MOCK_DATA) {
-        console.log('Using mock data directly (bypassing API call)');
-        data = mockData;
-        useBackend = false;
+      // First collect all the files that need processing
+      for (const [index, file] of files.entries()) {
+        // Skip if file already has OCR results
+        if (ocrResultsMap[index]) continue;
+        filesToProcess.push({ file, index });
       }
       
-      // Only make the API call if we're not using mock data
-      if (useBackend) {
+      console.log(`Processing ${filesToProcess.length} files`);
+      
+      // Then process each file
+      for (const { file, index } of filesToProcess) {
         try {
-          console.log('Attempting to call API at:', API_ENDPOINT);
-          // Make the API call to process the files with a timeout of 30 seconds
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 30000);
+          // Gunakan formData tanpa manipulasi tambahan (tidak mengkonversi tipe file)
+          const formData = new FormData();
+          formData.append('file', file); // File langsung dikirim apa adanya tanpa konversi
           
-          const response = await fetch(API_ENDPOINT, {
-            method: 'POST',
-            headers: {
-              'Authorization': API_TOKEN
-            },
-            body: formData,
-            signal: controller.signal
-          });
+          console.log(`Mengirim file ${file.name} ke server untuk diproses...`);
           
-          clearTimeout(timeoutId);
+          // Queue file for processing with retry mechanism
+          let retries = 0;
+          const maxRetries = 2;
+          let success = false;
+          let error = null;
           
-          if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`API error: ${response.status} - ${errorText}`);
-          }
-          
-          data = await response.json();
-          console.log('API response received:', data);
-          
-          // Check if data is an array or object and normalize it
-          if (data) {
-            // If data is not an array, wrap it in an array
-            if (!Array.isArray(data)) {
-              data = [data];
+          while (retries <= maxRetries && !success) {
+            try {
+              console.log(`Sending file to ${QUEUE_API_ENDPOINT} (attempt ${retries + 1})`);
+              
+              const response = await fetch(QUEUE_API_ENDPOINT, {
+                method: 'POST',
+                headers: {
+                  'Authorization': API_TOKEN
+                },
+                body: formData
+              });
+              
+              // Log response status
+              console.log(`Server response status: ${response.status}`);
+              
+              if (!response.ok) {
+                const errorText = await response.text();
+                console.error(`Error response from server: ${errorText}`);
+                throw new Error(`Error uploading file: ${response.status}`);
+              }
+              
+              // Handle response
+              const responseText = await response.text();
+              console.log(`Raw server response: ${responseText}`);
+              
+              let result;
+              try {
+                // Attempt to parse JSON
+                result = JSON.parse(responseText);
+              } catch (jsonError) {
+                console.error(`Failed to parse JSON response: ${jsonError.message}`);
+                console.log(`Invalid JSON response: ${responseText}`);
+                throw new Error(`Failed to parse server response`);
+              }
+              
+              if (result && result.fileId) {
+                const fileId = result.fileId;
+                
+                // Tambahkan ke antrian pemrosesan - use a callback to ensure we get the latest state
+                setProcessingQueue(prev => {
+                  // Check if this file is already in the queue
+                  const existingIndex = prev.findIndex(item => item.id === fileId);
+                  
+                  if (existingIndex !== -1) {
+                    // File already in queue, just update it
+                    const updatedQueue = [...prev];
+                    updatedQueue[existingIndex] = {
+                      ...updatedQueue[existingIndex],
+                      status: 'queued',
+                      progress: 0
+                    };
+                    return updatedQueue;
+                  } else {
+                    // Add new file to queue
+                    return [
+                      ...prev, 
+                      { 
+                        id: fileId,
+                        name: file.name,
+                        status: 'queued',
+                        progress: 0,
+                        originalFile: file,
+                        fileIndex: index
+                      }
+                    ];
+                  }
+                });
+                
+                // Tambahkan korelasi antara fileId dan fileIndex
+                setFileDataMap(prev => ({
+                  ...prev,
+                  [fileId]: {
+                    fileIndex: index,
+                    fileName: file.name,
+                    fileUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : null,
+                    processed: false,
+                    uniqueId: `${file.name}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}` // Tambahkan ID unik
+                  }
+                }));
+                
+                toast.success(`File ${file.name} ditambahkan ke antrian pemrosesan`);
+                success = true;
+              } else {
+                throw new Error(`Server tidak mengembalikan fileId`);
+              }
+            } catch (err) {
+              error = err;
+              retries++;
+              if (retries <= maxRetries) {
+                console.log(`Mencoba ulang pengiriman file ${file.name} (percobaan ke-${retries})`);
+                await new Promise(resolve => setTimeout(resolve, 1000 * retries)); // Exponential backoff
+              }
             }
-            
-            // If we have an empty array or the first element doesn't have output, use mock data
-            if (data.length === 0 || !data[0] || (!data[0].output && !data[0].jatuh_tempo_epoch)) {
-              console.log('API returned invalid data structure, using mock data');
-              data = mockData;
-            }
-            
-            // Handle case where data structure is different from expected
-            // Some APIs return an array of objects where each property is a separate object
-            // instead of a single object with all properties
-            if (data.length > 1 && !data[0].output && data[0].jatuh_tempo_epoch) {
-              console.log('Detected alternative API response format, normalizing...');
-              // This is the case where each property is a separate object in the array
-              // We need to combine them into a single object
-              const normalizedData = [{
-                jatuh_tempo_epoch: data.find(item => item.jatuh_tempo_epoch)?.jatuh_tempo_epoch,
-                tanggal_faktur_epoch: data.find(item => item.tanggal_faktur_epoch || item.tannggal_faktur_epoch)?.tanggal_faktur_epoch,
-                output: data.find(item => item.output)?.output || {}
-              }];
-              data = normalizedData;
-            }
           }
           
-          toast.success('Files processed successfully');
-        } catch (error) {
-          console.error('Error calling API:', error);
-          
-          // In development mode, fall back to mock data
-          if (import.meta.env.DEV) {
-            console.log('API call failed, falling back to mock data');
-            data = mockData;
-            
-            // Show error in modal
-            setErrorMessage(`${error.message}\n\nUsing mock data as fallback in development mode.`);
-            setErrorModalOpen(true);
-          } else {
-            // In production, propagate the error
-            throw error;
+          if (!success) {
+            console.error(`Gagal mengantrian file ${file.name} setelah ${maxRetries} percobaan:`, error);
+            toast.error(`Gagal mengantrian file ${file.name}: ${error.message}`);
           }
-        }
-      }
-      
-      if (data) {
-        // Log the normalized data structure
-        console.log('Normalized data structure:', data);
-        
-        // Update the state with the API response for the current file
-        if (data[0]) {
-          setOcrResults(data[0]);
-        }
-        
-        // Store results for all files
-        const newResultsMap = {};
-        data.forEach((result, index) => {
-          if (index < files.length) {
-            newResultsMap[index] = result;
-          }
-        });
-        
-        setOcrResultsMap(newResultsMap);
-        
-        // Scroll to results
-        if (resultsRef.current) {
-          resultsRef.current.scrollIntoView({ behavior: 'smooth' });
+        } catch (fileError) {
+          console.error(`Error queueing file ${file.name}:`, fileError);
+          toast.error(`Error queueing file ${file.name}: ${fileError.message}`);
         }
       }
     } catch (error) {
-      console.error('Error processing files:', error);
-      
-      // Show error in modal
-      setErrorMessage(error.message || 'An error occurred while processing the files');
-      setErrorModalOpen(true);
+      console.error('Error in process file:', error);
+      toast.error(`Terjadi kesalahan saat memproses file: ${error.message}`);
     } finally {
       setIsProcessing(false);
+      
+      // Mulai polling untuk status file
+      if (!statusPollingActive) {
+        setStatusPollingActive(true);
+      }
     }
   };
 
-  const handleNextImage = () => {
-    if (currentFileIndex < files.length - 1) {
-      const nextIndex = currentFileIndex + 1;
-      setCurrentFileIndex(nextIndex);
-      setRotation(0);
-      // Load OCR results for next image if they exist
-      const nextResults = ocrResultsMap[nextIndex];
-      // Explicitly set to null if no results exist
-      setOcrResults(nextResults ? nextResults : null)
-    }
-  };
-
-  const handlePrevImage = () => {
-    if (currentFileIndex > 0) {
-      const prevIndex = currentFileIndex - 1;
-      setCurrentFileIndex(prevIndex);
-      setRotation(0);
-      // Load OCR results for previous image if they exist
-      const prevResults = ocrResultsMap[prevIndex];
-      // Explicitly set to null if no results exist
-      setOcrResults(prevResults ? prevResults : null)
-    }
-  };
-
+  // Fungsi handleSubmitData untuk menyimpan data OCR
   const handleSubmitData = async () => {
     if (!ocrResults) {
-      toast.error('No OCR results to save');
+      toast.error('Tidak ada hasil OCR untuk disimpan');
       return;
     }
 
     setIsSaving(true);
     try {
-      // Get the current image data as base64
-      const currentImage = files[currentFileIndex];
+      // Dapatkan data gambar saat ini
+      const currentFile = files[currentFileIndex];
       let imageData = null;
       
-      if (currentImage) {
-        console.log('Processing image for submission:', currentImage.name);
-        
-        // If the image is already in base64 format
-        if (typeof currentImage.preview === 'string' && currentImage.preview.startsWith('data:image')) {
-          console.log('Image is already in base64 format');
-          imageData = currentImage.preview;
-        } else {
-          // Convert the image to base64
-          try {
-            console.log('Converting image to base64');
-            
-            // If current image is a File object
-            if (currentImage instanceof File) {
-              console.log('Image is a File object, reading directly');
-              const reader = new FileReader();
-              imageData = await new Promise((resolve, reject) => {
-                reader.onloadend = () => resolve(reader.result);
-                reader.onerror = () => reject(new Error('Failed to read file'));
-                reader.readAsDataURL(currentImage);
-              });
-            } 
-            // If current image has a preview URL
-            else if (currentImage.preview) {
-              console.log('Image has a preview URL, fetching blob');
-              const response = await fetch(currentImage.preview);
-              if (!response.ok) {
-                throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
-              }
-              const blob = await response.blob();
-              const reader = new FileReader();
-              
-              imageData = await new Promise((resolve, reject) => {
-                reader.onloadend = () => resolve(reader.result);
-                reader.onerror = () => reject(new Error('Failed to read blob'));
-                reader.readAsDataURL(blob);
-              });
-            } else {
-              throw new Error('Invalid image format');
-            }
-            
-            console.log('Successfully converted image to base64');
-          } catch (error) {
-            console.error('Error converting image to base64:', error);
-            toast.error(`Error preparing image: ${error.message}`);
-            // Continue without image data
-            imageData = null;
-          }
+      // Jika file adalah gambar, konversi ke base64
+      if (currentFile && currentFile.type.startsWith('image/')) {
+        try {
+          const reader = new FileReader();
+          imageData = await new Promise((resolve, reject) => {
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = () => reject(new Error('Gagal membaca file'));
+            reader.readAsDataURL(currentFile);
+          });
+        } catch (err) {
+          console.error('Error converting image to base64:', err);
         }
       }
-
-      console.log('Sending data to:', SAVE_API_ENDPOINT);
-      console.log('Image data included:', imageData ? 'Yes' : 'No');
       
-      // Make a copy of OCR results to avoid modifying the original
+      // Data yang akan dikirim - backend mengharapkan editedData
       const dataToSend = {
-        originalData: ocrResults,
-        editedData: ocrResults, // This will contain any edits made in the table
-        imageIndex: currentFileIndex,
-        imageData: imageData, // Include the base64 image data
+        originalData: ocrResults,  // Data OCR original
+        editedData: ocrResults,    // Tambahkan editedData yang sama dengan ocrResults karena OCRResultsTable sudah mengupdate ocrResults
+        imageData: imageData       // Data gambar
       };
       
-      // Log the shape of the data being sent without the full image content
-      console.log('Data structure being sent:', {
-        ...dataToSend,
-        imageData: imageData ? `[Base64 string of length ${imageData.length}]` : null
+      console.log('Sending data to server:', {
+        hasOriginalData: !!dataToSend.originalData,
+        hasEditedData: !!dataToSend.editedData,
+        hasImageData: !!dataToSend.imageData
       });
       
+      // Kirim data ke API
       const response = await fetch(SAVE_API_ENDPOINT, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${API_TOKEN}`,
+          'Authorization': API_TOKEN
         },
-        body: JSON.stringify(dataToSend),
+        body: JSON.stringify(dataToSend)
       });
-
+      
       if (!response.ok) {
-        let errorMessage = `Server responded with status: ${response.status} ${response.statusText}`;
-        
+        // Coba ambil pesan error dari respons
+        let errorMessage = `Server responded with status: ${response.status}`;
         try {
-          const errorText = await response.text();
-          console.error('Server error response:', errorText);
-          
-          // Try to parse as JSON
-          try {
-            const errorJson = JSON.parse(errorText);
-            errorMessage = `Failed to save data: ${errorJson.detail || errorJson.message || errorMessage}`;
-          } catch (parseError) {
-            // If not JSON, use the raw text if it exists
-            if (errorText && errorText.trim()) {
-              errorMessage = `Failed to save data: ${errorText}`;
-            }
+          const errorData = await response.json();
+          if (errorData && errorData.error && errorData.error.message) {
+            errorMessage = errorData.error.message;
           }
-        } catch (responseError) {
-          console.error('Error reading response:', responseError);
+        } catch (e) {
+          console.error('Could not parse error response:', e);
         }
-        
         throw new Error(errorMessage);
       }
-
-      const result = await response.json();
-      console.log('Save result:', result);
-      toast.success('Data saved successfully!');
       
-      // If image was saved successfully and has an ID, we could do something with it here
-      if (result && result.id) {
-        console.log(`Invoice saved with ID: ${result.id}`);
-      }
+      const result = await response.json();
+      toast.success('Data berhasil disimpan!');
+      
     } catch (error) {
       console.error('Failed to save data:', error);
-      toast.error(`Failed to save: ${error.message || 'Unknown error. Please try again'}`);
+      toast.error(`Gagal menyimpan: ${error.message}`);
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleDataChange = (newData) => {
-    setOcrResults(newData);
-    // Update results in the map when data changes
+  // Handle data change dari OCRResultsTable
+  const handleDataChange = (updatedData) => {
+    if (!ocrResults) return;
+    
+    // Pastikan updatedData memiliki struktur yang benar
+    if (!updatedData.output) {
+      console.error('Updated data tidak memiliki properti output');
+      return;
+    }
+    
+    // Pastikan items adalah array
+    if (!updatedData.output.items || !Array.isArray(updatedData.output.items)) {
+      console.warn('updatedData.output.items tidak valid, menggunakan array kosong');
+      updatedData.output.items = [];
+    }
+    
+    // Update data state
+    setData(updatedData.output.items || []);
+    
+    // Update ocrResults dengan data yang baru
+    const updatedOcrResults = {
+      ...ocrResults,
+      output: {
+        ...ocrResults.output,
+        ...updatedData.output
+      }
+    };
+    
+    // Update ocrResults state
+    setOcrResults(updatedOcrResults);
+    
+    // Update ocrResultsMap untuk file saat ini
     setOcrResultsMap(prev => ({
       ...prev,
-      [currentFileIndex]: newData
+      [currentFileIndex]: updatedOcrResults
     }));
+    
+    // Update fileDataMap jika file ini ada dalam map
+    Object.entries(fileDataMap).forEach(([fileId, fileInfo]) => {
+      if (fileInfo.fileIndex === currentFileIndex) {
+        setFileDataMap(prev => ({
+          ...prev,
+          [fileId]: {
+            ...prev[fileId],
+            ocrData: updatedOcrResults
+          }
+        }));
+      }
+    });
+  };
+
+  // Render the processing queue section
+  const renderProcessingQueue = () => {
+    if (processingQueue.length === 0) {
+      return null; // Don't show empty queue
+    }
+    
+    return (
+      <div className="fixed bottom-0 right-0 p-4 w-96 max-h-96 overflow-y-auto bg-white shadow-lg rounded-t-lg z-50">
+        <h3 className="text-lg font-semibold mb-3">Antrian Pemrosesan ({processingQueue.length})</h3>
+        <div className="space-y-4">
+          {processingQueue.map(item => (
+            <div 
+              key={`queue-${item.id}`} 
+              className="bg-gray-50 p-3 rounded border border-gray-200"
+            >
+              <div className="flex justify-between items-center mb-2">
+                <span className="font-medium text-sm truncate" title={item.name}>
+                  {item.name}
+                </span>
+                <span className={`text-xs px-2 py-1 rounded ${
+                  item.status === 'completed' ? 'bg-green-100 text-green-800' : 
+                  item.status === 'error' ? 'bg-red-100 text-red-800' :
+                  'bg-blue-100 text-blue-800'
+                }`}>
+                  {item.status === 'queued' ? 'Dalam Antrian' : 
+                   item.status === 'processing' ? 'Sedang Diproses' : 
+                   item.status === 'completed' ? 'Selesai' : 'Error'}
+                </span>
+              </div>
+              
+              {/* Progress bar */}
+              {item.status !== 'completed' && item.status !== 'error' && (
+                <div className="w-full bg-gray-200 rounded-full h-2.5">
+                  <div 
+                    className="bg-blue-600 h-2.5 rounded-full transition-all duration-500 ease-in-out" 
+                    style={{ width: `${item.progress}%` }}
+                  ></div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -569,12 +1045,12 @@ export default function OCRPage() {
             <div className="flex flex-col items-center justify-center w-full">
               {files.length === 0 ? (
                 <div className="w-full max-w-3xl mx-auto">
-                  <FileUpload onFilesUploaded={handleFilesUploaded} />
+                  <FileUpload onFilesUploaded={handleFileUpload} />
                 </div>
               ) : (
                 <>
                   <div className="w-full mb-8">
-                    <FileUpload onFilesUploaded={handleFilesUploaded} />
+                    <FileUpload onFilesUploaded={handleFileUpload} />
                   </div>
                   
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 w-full">
@@ -583,7 +1059,7 @@ export default function OCRPage() {
                       <FileList
                         files={files}
                         currentIndex={currentFileIndex}
-                        onFileSelect={handleFileSelect}
+                        onFileSelect={handleFileChange}
                         onFileDelete={handleFileDelete}
                       />
                       <div className="mt-4">
@@ -696,6 +1172,96 @@ export default function OCRPage() {
           </div>
         </main>
       </div>
+      {/* Processing Queue Section */}
+      {processingQueue.length > 0 && (
+        renderProcessingQueue()
+      )}
+      {/* Processed Results Section */}
+      {processedResults.length > 0 && (
+        <div className="mt-6 bg-white p-4 rounded-lg shadow">
+          <h3 className="text-lg font-semibold mb-3">Hasil OCR Tersedia</h3>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Nama File
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Waktu Proses
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Aksi
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {processedResults.map((result, index) => (
+                  <tr key={`processed-result-${index}-${result.id}`}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {result.filename}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {new Date(result.processedAt).toLocaleString()}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                      <button
+                        onClick={() => {
+                          // Alihkan ke file yang sesuai
+                          if (result.fileIndex !== undefined) {
+                            handleFileChange(result.fileIndex);
+                          }
+                        }}
+                        className="text-indigo-600 hover:text-indigo-900"
+                      >
+                        Lihat Data
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {/* File list section */}
+      {files.length > 0 && (
+        <div className="mt-4">
+          <h3 className="font-semibold text-lg mb-2">File Tersedia</h3>
+          <div className="flex flex-wrap gap-3">
+            {files.map((file, index) => (
+              <div 
+                key={index}
+                onClick={() => handleFileChange(index)}
+                className={`
+                  relative border p-1 rounded cursor-pointer 
+                  ${index === currentFileIndex ? 'border-blue-500 ring-2 ring-blue-300' : 'border-gray-300'}
+                `}
+              >
+                {file.type.startsWith('image/') ? (
+                  <img 
+                    src={URL.createObjectURL(file)} 
+                    alt={`File ${index + 1}`} 
+                    className="w-20 h-20 object-cover" 
+                  />
+                ) : (
+                  <div className="w-20 h-20 flex items-center justify-center bg-gray-100">
+                    <span className="text-xs text-center p-1">PDF Document</span>
+                  </div>
+                )}
+                <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-60 text-white text-xs p-0.5 truncate">
+                  {file.name}
+                </div>
+                {ocrResultsMap[index] && (
+                  <div className="absolute top-0 right-0 bg-green-500 w-4 h-4 rounded-full flex items-center justify-center">
+                    <span className="text-white text-xs">✓</span>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {/* Error Modal */}
       <ErrorModal 
         isOpen={errorModalOpen}

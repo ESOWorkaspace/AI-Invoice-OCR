@@ -4,6 +4,7 @@ import Layout from './components/Layout'
 import OCRPage from './pages/OCRPage'
 import InvoicesPage from './pages/database/InvoicesPage'
 import DatabaseManagePage from './pages/database/DatabaseManagePage'
+import ProductsPage from './pages/database/ProductsPage'
 
 function App() {
   return (
@@ -16,6 +17,7 @@ function App() {
           <Route path="/batch" element={<div className="p-8 text-center">Batch Processing (Coming Soon)</div>} />
           <Route path="/database/invoices" element={<InvoicesPage />} />
           <Route path="/database/manage" element={<DatabaseManagePage />} />
+          <Route path="/database/products" element={<ProductsPage />} />
           <Route path="/database/*" element={<div className="p-8 text-center">Database Management (Coming Soon)</div>} />
           <Route path="/settings/*" element={<div className="p-8 text-center">Settings (Coming Soon)</div>} />
           <Route path="/help" element={<div className="p-8 text-center">Help & Documentation (Coming Soon)</div>} />

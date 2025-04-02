@@ -16,6 +16,7 @@ const { sequelize } = require('./config/database');
 const invoiceRoutes = require('./routes/invoiceRoutes');
 const ocrRoutes = require('./routes/ocrRoutes');
 const productRoutes = require('./routes/productRoutes');
+const productItemRoutes = require('./routes/productItemRoutes');
 const rawOcrRoutes = require('./routes/rawOcrRoutes');
 
 // Create Express app
@@ -61,6 +62,7 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 app.use('/api/invoices', invoiceRoutes);
 app.use('/api/ocr', ocrRoutes);
 app.use('/api/products', productRoutes);
+app.use('/api/product-items', productItemRoutes);
 app.use('/api/raw-ocr', rawOcrRoutes);
 
 // Root endpoint
@@ -84,7 +86,7 @@ app.use((err, req, res, next) => {
 });
 
 // Start server
-const PORT = process.env.PORT || 1512;
+const PORT = process.env.PORT || 1513;
 
 async function startServer() {
   try {
