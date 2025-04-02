@@ -8,6 +8,7 @@ const uuid = require('uuid');
 const path = require('path');
 const fs = require('fs');
 const moment = require('moment');
+const queueService = require('../services/queueService');
 
 /**
  * Save OCR data to the database
@@ -56,13 +57,37 @@ exports.saveOcrData = async (req, res) => {
       supplier_name = editedData.supplier_name;
     }
     
+    // Helper function to parse dates with better error handling
+    function parseDate(dateValue, format = 'DD-MM-YYYY') {
+      if (!dateValue) return null;
+      
+      // If already a Date object or timestamp
+      if (dateValue instanceof Date) return dateValue;
+      if (typeof dateValue === 'number') return new Date(dateValue);
+      
+      // Handle different string formats
+      let parsed;
+      
+      // Try specific format first
+      parsed = moment(dateValue, format, true);
+      if (parsed.isValid()) return parsed.toDate();
+      
+      // Try generic parsing as fallback
+      parsed = moment(dateValue);
+      if (parsed.isValid()) return parsed.toDate();
+      
+      // Log failure and return null
+      console.warn(`[${requestId}] Failed to parse date: ${dateValue}`);
+      return null;
+    }
+    
     // Extract invoice date
     let invoice_date = null;
     if (editedData.output && editedData.output.tanggal_faktur && editedData.output.tanggal_faktur.value) {
-      // Try to parse date in DD-MM-YYYY format
-      invoice_date = moment(editedData.output.tanggal_faktur.value, 'DD-MM-YYYY').toDate();
+      invoice_date = parseDate(editedData.output.tanggal_faktur.value);
+      console.log(`[${requestId}] Parsed invoice date: ${invoice_date}`);
     } else if (editedData.invoice_date) {
-      invoice_date = moment(editedData.invoice_date).toDate();
+      invoice_date = parseDate(editedData.invoice_date);
     }
     
     // Ensure we always have a date for RawOCRData (required by model)
@@ -71,9 +96,19 @@ exports.saveOcrData = async (req, res) => {
     // Extract due date
     let due_date = null;
     if (editedData.output && editedData.output.tgl_jatuh_tempo && editedData.output.tgl_jatuh_tempo.value) {
-      due_date = moment(editedData.output.tgl_jatuh_tempo.value, 'DD-MM-YYYY').toDate();
+      due_date = parseDate(editedData.output.tgl_jatuh_tempo.value);
+      console.log(`[${requestId}] Parsed due date: ${due_date}`);
     } else if (editedData.due_date) {
-      due_date = moment(editedData.due_date).toDate();
+      due_date = parseDate(editedData.due_date);
+    }
+    
+    // Validate that invoice date is not after due date
+    if (invoice_date && due_date && invoice_date > due_date) {
+      return res.status(400).json({
+        error: {
+          message: 'Tanggal faktur tidak boleh lebih dari tanggal jatuh tempo'
+        }
+      });
     }
     
     // Extract payment type
@@ -454,6 +489,102 @@ exports.testConnection = async (req, res) => {
         message: 'Connection test failed',
         details: error.message
       }
+    });
+  }
+};
+
+/**
+ * Queue a file for OCR processing
+ */
+exports.queueFileForProcessing = async (req, res) => {
+  try {
+    // Validasi file exists
+    if (!req.file) {
+      return res.status(400).json({ error: 'File not provided' });
+    }
+    
+    console.log('Received request to queue file:', req.file.originalname);
+    
+    // Validasi file type
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'];
+    if (!allowedTypes.includes(req.file.mimetype)) {
+      // Hapus file jika tipe tidak valid
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ 
+        error: 'Invalid file type. Only JPEG, JPG, PNG, and PDF files are allowed.'
+      });
+    }
+    
+    // Validasi file size (max 25MB)
+    const maxSize = 25 * 1024 * 1024;
+    if (req.file.size > maxSize) {
+      // Hapus file jika ukuran melebihi limit
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ 
+        error: 'File size too large. Maximum allowed size is 25MB.'
+      });
+    }
+    
+    // Tambahkan ke antrian untuk diproses tanpa konversi apapun
+    // File disimpan apa adanya dan akan dikirim ke OCR API oleh queueService
+    const fileId = queueService.queueFile(req.file.path, req.file.originalname);
+    
+    res.status(200).json({ 
+      message: 'File added to processing queue', 
+      fileId: fileId 
+    });
+    
+    console.log(`File queued successfully with ID: ${fileId}`);
+    
+  } catch (error) {
+    console.error('Error in queueFileForProcessing:', error);
+    res.status(500).json({ error: 'Failed to queue file for processing' });
+  }
+};
+
+/**
+ * Get processing status of a file
+ */
+exports.getFileStatus = async (req, res) => {
+  const requestId = uuid.v4().substring(0, 8);
+  const { fileId } = req.params;
+  console.log(`[${requestId}] Getting status for file: ${fileId}`);
+  
+  try {
+    const status = queueService.getFileStatus(fileId);
+    res.json(status);
+  } catch (error) {
+    console.error(`[${requestId}] Error getting file status:`, error);
+    res.status(500).json({
+      error: {
+        message: 'Error getting file status',
+        details: error.message
+      }
+    });
+  }
+};
+
+/**
+ * Get all processing statuses
+ */
+exports.getAllStatuses = async (req, res) => {
+  try {
+    const statuses = queueService.getAllStatuses();
+    
+    // Log statuses for debugging
+    console.log(`Returning ${statuses.length} status items`);
+    
+    // Ensure consistent structure in response
+    res.status(200).json({ 
+      success: true, 
+      statuses 
+    });
+  } catch (error) {
+    console.error('Error getting all statuses:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error getting all statuses', 
+      error: error.message 
     });
   }
 };

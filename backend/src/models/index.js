@@ -4,12 +4,22 @@
 const ProcessedInvoice = require('./ProcessedInvoice');
 const RawOCRData = require('./RawOCRData');
 const Product = require('./Product');
+const ProductItem = require('./ProductItem');
+const ProductVariant = require('./ProductVariant');
+const ProductUnit = require('./ProductUnit');
+const ProductPrice = require('./ProductPrice');
+const ProductStock = require('./ProductStock');
 
 // Set up associations
 const models = {
   ProcessedInvoice,
   RawOCRData,
-  Product
+  Product,
+  ProductItem,
+  ProductVariant,
+  ProductUnit,
+  ProductPrice,
+  ProductStock
 };
 
 // Initialize associations if they exist

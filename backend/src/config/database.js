@@ -7,12 +7,12 @@ require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 
 // Database configuration from environment variables
 const config = {
-  database: process.env.DB_NAME || 'ocr_db',
-  username: process.env.DB_USER || 'postgres',
+  database: process.env.DB_DATABASE || 'ocr_db',
+  username: process.env.DB_USERNAME || 'postgres',
   password: process.env.DB_PASSWORD || '123123',
   host: process.env.DB_HOST || '127.0.0.1',
   port: process.env.DB_PORT || 5432,
-  dialect: 'postgres',
+  dialect: process.env.DB_CONNECTION === 'postgresql' ? 'postgres' : process.env.DB_CONNECTION || 'postgres',
   logging: process.env.NODE_ENV === 'development' ? console.log : false,
   dialectOptions: {
     ssl: process.env.DB_SSL === 'true' ? {
@@ -52,7 +52,7 @@ const sequelize = new Sequelize(
 const testConnection = async () => {
   try {
     await sequelize.authenticate();
-    console.log('Database connection established successfully.');
+    console.log('Database connection has been established successfully.');
     return true;
   } catch (error) {
     console.error('Unable to connect to the database:', error);

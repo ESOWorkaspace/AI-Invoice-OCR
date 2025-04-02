@@ -12,7 +12,7 @@ export default function FileList({ files, currentIndex, onFileSelect, onFileDele
       <ul className="divide-y divide-gray-200">
         {files.map((file, index) => (
           <li
-            key={file.name}
+            key={`file-${index}-${file.name}`}
             className={`
               p-4 hover:bg-gray-50
               ${index === currentIndex ? 'bg-blue-50' : ''}

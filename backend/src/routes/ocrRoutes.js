@@ -18,4 +18,13 @@ router.post('/upload', uploadMiddleware.single('file'), ocrController.uploadFile
 // Test connection
 router.get('/test-connection', ocrController.testConnection);
 
+// Queue file for asynchronous processing
+router.post('/queue', uploadMiddleware.single('file'), ocrController.queueFileForProcessing);
+
+// Get file processing status
+router.get('/status/:fileId', ocrController.getFileStatus);
+
+// Get all file processing statuses
+router.get('/status', ocrController.getAllStatuses);
+
 module.exports = router;

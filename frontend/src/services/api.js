@@ -111,6 +111,37 @@ const mockData = {
       created_at: '2025-03-01T09:15:00Z',
       updated_at: '2025-03-01T09:15:00Z'
     }
+  ],
+  productItems: [
+    {
+      ID_Produk: 1,
+      Kode_Item: 'M001',
+      Nama_Item: 'Indomie Goreng',
+      Jenis: 'Mie Instan',
+      created_at: '2025-03-01T09:00:00Z',
+      updated_at: '2025-03-01T09:00:00Z',
+      variants: [
+        { ID_Varian: 1, ID_Produk: 1, Deskripsi: 'Original' },
+        { ID_Varian: 2, ID_Produk: 1, Deskripsi: 'Pedas' }
+      ],
+      units: [
+        { ID_Satuan: 1, ID_Produk: 1, Nama_Satuan: 'pcs', Jumlah_Dalam_Satuan_Dasar: 1 },
+        { ID_Satuan: 2, ID_Produk: 1, Nama_Satuan: 'dus', Jumlah_Dalam_Satuan_Dasar: 40 }
+      ]
+    },
+    {
+      ID_Produk: 2,
+      Kode_Item: 'B001',
+      Nama_Item: 'Beras Pandan Wangi',
+      Jenis: 'Beras',
+      created_at: '2025-03-01T09:15:00Z',
+      updated_at: '2025-03-01T09:15:00Z',
+      variants: [],
+      units: [
+        { ID_Satuan: 3, ID_Produk: 2, Nama_Satuan: 'kg', Jumlah_Dalam_Satuan_Dasar: 1 },
+        { ID_Satuan: 4, ID_Produk: 2, Nama_Satuan: 'karung', Jumlah_Dalam_Satuan_Dasar: 25 }
+      ]
+    }
   ]
 };
 
@@ -484,9 +515,9 @@ export const productApi = {
   // Create a new product
   create: async (productData) => {
     if (USE_MOCK_DATA) {
-      console.log('Creating mock product');
+      console.log('Mock mode: Creating product', productData);
       const newProduct = {
-        id: mockData.products.length + 1,
+        id: Math.floor(Math.random() * 10000),
         ...productData,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -497,7 +528,7 @@ export const productApi = {
     
     try {
       console.log('Creating product via API');
-      const response = await api.post('/api/products/', productData);
+      const response = await api.post('/api/product-items/', productData);
       console.log('Create product API response:', response);
       return response.data;
     } catch (error) {
@@ -576,6 +607,271 @@ export const productApi = {
       return true;
     } catch (error) {
       console.error(`Error deleting product ${id}: ${error.message}`);
+      throw error;
+    }
+  }
+};
+
+// API endpoints for the new product management system
+export const productItemApi = {
+  // Get all products with optional pagination and filtering
+  getAllProducts: async (params = {}) => {
+    if (USE_MOCK_DATA) {
+      console.log('Using mock data for productItems');
+      return { data: mockData.productItems || [] };
+    }
+    
+    try {
+      console.log('Fetching product items from API');
+      const response = await api.get('/api/product-items/', { params });
+      console.log('Product items API response:', response);
+      return response;
+    } catch (error) {
+      console.error(`Error fetching product items: ${error.message}`);
+      console.log('Falling back to mock data for productItems');
+      return { data: mockData.productItems || [] };
+    }
+  },
+  
+  // Get product by ID with all related data
+  getProductById: async (id) => {
+    if (USE_MOCK_DATA) {
+      console.log(`Using mock data for product item ${id}`);
+      return mockData.productItems.find(item => item.ID_Produk === Number(id));
+    }
+    
+    try {
+      console.log(`Fetching product item ${id} from API`);
+      const response = await api.get(`/api/product-items/${id}`);
+      console.log(`Product item ${id} API response:`, response);
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching product item ${id}: ${error.message}`);
+      console.log(`Falling back to mock data for product item ${id}`);
+      return mockData.productItems.find(item => item.ID_Produk === Number(id));
+    }
+  },
+  
+  // Create new product with all related data
+  createProduct: async (data) => {
+    if (USE_MOCK_DATA) {
+      console.log('Creating mock product item');
+      const newProductId = mockData.productItems.length > 0 
+        ? Math.max(...mockData.productItems.map(p => p.ID_Produk)) + 1 
+        : 1;
+      
+      const newProduct = {
+        ID_Produk: newProductId,
+        ...data.product,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        variants: data.variants ? data.variants.map((variant, index) => ({
+          ID_Varian: mockData.productItems.flatMap(p => p.variants).length + index + 1,
+          ID_Produk: newProductId,
+          ...variant
+        })) : [],
+        units: data.units ? data.units.map((unit, index) => ({
+          ID_Satuan: mockData.productItems.flatMap(p => p.units).length + index + 1,
+          ID_Produk: newProductId,
+          ...unit
+        })) : []
+      };
+      
+      mockData.productItems.push(newProduct);
+      return newProduct;
+    }
+    
+    try {
+      console.log('Creating new product item via API');
+      const response = await api.post('/api/product-items/', data);
+      console.log('Create product item API response:', response);
+      return response.data;
+    } catch (error) {
+      console.error(`Error creating product item: ${error.message}`);
+      throw error;
+    }
+  },
+  
+  // Update product and related data
+  updateProduct: async (id, data) => {
+    if (USE_MOCK_DATA) {
+      console.log(`Updating mock product item ${id}`);
+      const index = mockData.productItems.findIndex(item => item.ID_Produk === Number(id));
+      
+      if (index === -1) {
+        throw new Error(`Product item with ID ${id} not found`);
+      }
+      
+      // Update main product data
+      mockData.productItems[index] = {
+        ...mockData.productItems[index],
+        ...data.product,
+        updated_at: new Date().toISOString()
+      };
+      
+      // Update variants if provided
+      if (data.variants) {
+        mockData.productItems[index].variants = data.variants.map((variant, idx) => ({
+          ID_Varian: variant.ID_Varian || mockData.productItems.flatMap(p => p.variants).length + idx + 1,
+          ID_Produk: Number(id),
+          ...variant
+        }));
+      }
+      
+      // Update units if provided
+      if (data.units) {
+        mockData.productItems[index].units = data.units.map((unit, idx) => ({
+          ID_Satuan: unit.ID_Satuan || mockData.productItems.flatMap(p => p.units).length + idx + 1,
+          ID_Produk: Number(id),
+          ...unit
+        }));
+      }
+      
+      return mockData.productItems[index];
+    }
+    
+    try {
+      console.log(`Updating product item ${id} via API`);
+      const response = await api.put(`/api/product-items/${id}`, data);
+      console.log(`Update product item ${id} API response:`, response);
+      return response.data;
+    } catch (error) {
+      console.error(`Error updating product item ${id}: ${error.message}`);
+      throw error;
+    }
+  },
+  
+  // Delete product and all related data
+  deleteProduct: async (id) => {
+    if (USE_MOCK_DATA) {
+      console.log(`Deleting mock product item ${id}`);
+      const index = mockData.productItems.findIndex(item => item.ID_Produk === Number(id));
+      
+      if (index === -1) {
+        throw new Error(`Product item with ID ${id} not found`);
+      }
+      
+      mockData.productItems.splice(index, 1);
+      return { success: true };
+    }
+    
+    try {
+      console.log(`Deleting product item ${id} via API`);
+      const response = await api.delete(`/api/product-items/${id}`);
+      console.log(`Delete product item ${id} API response:`, response);
+      return response.data;
+    } catch (error) {
+      console.error(`Error deleting product item ${id}: ${error.message}`);
+      throw error;
+    }
+  },
+  
+  // Delete all products with confirmation code
+  deleteAllProducts: async (confirmationCode, confirmationText) => {
+    if (USE_MOCK_DATA) {
+      console.log('Mock mode: Would delete all products with confirmation code');
+      return { success: true, message: 'All products would be deleted in production mode' };
+    }
+    
+    try {
+      console.log('Deleting all products with confirmation code');
+      const response = await api.delete('/api/product-items/delete-all/confirm', {
+        data: { 
+          confirmationCode,
+          confirmationText
+        }
+      });
+      console.log('Delete all products API response:', response);
+      return response.data;
+    } catch (error) {
+      console.error(`Error deleting all products: ${error.message}`);
+      throw error;
+    }
+  },
+  
+  // Import products in bulk
+  importProducts: async (data) => {
+    if (USE_MOCK_DATA) {
+      console.log('Importing mock product items');
+      // Handle import logic for mock data if needed
+      return { imported: data.products ? data.products.length : 0, failed: 0 };
+    }
+    
+    try {
+      console.log('Importing product items via API');
+      const response = await api.post('/api/product-items/import', data);
+      console.log('Import product items API response:', response);
+      return response.data;
+    } catch (error) {
+      console.error(`Error importing product items: ${error.message}`);
+      throw error;
+    }
+  },
+  
+  // Export all products
+  exportProducts: async (format = 'json') => {
+    if (USE_MOCK_DATA) {
+      console.log('Mock mode: Would export products in ' + format + ' format');
+      return mockData.products;
+    }
+    
+    try {
+      console.log(`Exporting products in ${format} format`);
+      
+      if (format === 'csv') {
+        // For CSV, we need to use a different approach to handle the file download
+        const response = await api.get('/api/product-items/export/all', {
+          params: { format: 'csv' },
+          responseType: 'blob' // Important for handling file downloads
+        });
+        
+        // Create a download link and trigger it
+        const url = window.URL.createObjectURL(new Blob([response.data]));
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', 'products-export.csv');
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        
+        return { success: true, message: 'CSV downloaded successfully' };
+      } else {
+        // For JSON, we can just return the data
+        const response = await api.get('/api/product-items/export/all');
+        return response.data;
+      }
+    } catch (error) {
+      console.error(`Error exporting products: ${error.message}`);
+      throw error;
+    }
+  },
+  
+  // Import products in bulk
+  importProducts: async (data) => {
+    if (USE_MOCK_DATA) {
+      console.log('Importing mock product items');
+      // Handle import logic for mock data if needed
+      return { imported: data.products ? data.products.length : 0, failed: 0 };
+    }
+    
+    try {
+      console.log('Importing product items via API');
+      const response = await api.post('/api/product-items/import', data);
+      console.log('Import product items API response:', response);
+      return response.data;
+    } catch (error) {
+      console.error(`Error importing product items: ${error.message}`);
+      throw error;
+    }
+  },
+  
+  bulkDeleteProducts: async (ids) => {
+    try {
+      // Send an array of product IDs to delete in bulk
+      const response = await api.post('/api/product-items/bulk-delete', { ids });
+      return response.data;
+    } catch (error) {
+      console.error(`Error deleting products in bulk: ${error.message}`);
       throw error;
     }
   }
@@ -721,5 +1017,6 @@ export default {
   invoiceApi,
   rawOcrApi,
   productApi,
+  productItemApi,
   databaseApi
 };

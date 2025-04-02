@@ -1,20 +1,21 @@
 import { useState, useEffect } from 'react';
-import { productApi } from '../../services/api';
+import { productItemApi } from '../../services/api';
 import toast from 'react-hot-toast';
 
 export default function ProductForm({ product = null, onSuccess, onCancel }) {
   const isEditMode = !!product;
   
   const [formData, setFormData] = useState({
-    product_code: '',
-    product_name: '',
-    category: '',
-    unit: '',
-    price: 0,
-    stock: 0,
-    supplier_code: '',
-    barcode: '',
-    min_stock: 0
+    Kode_Item: '',
+    Nama_Item: '',
+    Jenis: '',
+    Supplier_Code: '',
+    Supplier_Name: '',
+    Satuan: '',
+    Harga: 0,
+    Stok: 0,
+    Barcode: '',
+    Stok_Minimum: 0
   });
   
   const [errors, setErrors] = useState({});
@@ -24,20 +25,21 @@ export default function ProductForm({ product = null, onSuccess, onCancel }) {
   useEffect(() => {
     if (isEditMode && product) {
       setFormData({
-        product_code: product.product_code || '',
-        product_name: product.product_name || '',
-        category: product.category || '',
-        unit: product.unit || '',
-        price: product.price || 0,
-        stock: product.stock || 0,
-        supplier_code: product.supplier_code || '',
-        barcode: product.barcode || '',
-        min_stock: product.min_stock || 0
+        Kode_Item: product.Kode_Item || '',
+        Nama_Item: product.Nama_Item || '',
+        Jenis: product.Jenis || '',
+        Supplier_Code: product.Supplier_Code || '',
+        Supplier_Name: product.Supplier_Name || '',
+        Satuan: product.Satuan || '',
+        Harga: product.Harga || 0,
+        Stok: product.Stok || 0,
+        Barcode: product.Barcode || '',
+        Stok_Minimum: product.Stok_Minimum || 0
       });
     }
   }, [isEditMode, product]);
   
-  // Handle input change
+  // Handle input changes
   const handleChange = (e) => {
     const { name, value, type } = e.target;
     
@@ -50,7 +52,7 @@ export default function ProductForm({ product = null, onSuccess, onCancel }) {
       [name]: processedValue
     }));
     
-    // Clear error for this field when user types
+    // Clear error for this field if it exists
     if (errors[name]) {
       setErrors(prev => ({
         ...prev,
@@ -63,32 +65,32 @@ export default function ProductForm({ product = null, onSuccess, onCancel }) {
   const validateForm = () => {
     const newErrors = {};
     
-    if (!formData.product_code.trim()) {
-      newErrors.product_code = 'Product code is required';
+    if (!formData.Kode_Item) {
+      newErrors.Kode_Item = 'Product code is required';
     }
     
-    if (!formData.product_name.trim()) {
-      newErrors.product_name = 'Product name is required';
+    if (!formData.Nama_Item) {
+      newErrors.Nama_Item = 'Product name is required';
     }
     
-    if (!formData.category.trim()) {
-      newErrors.category = 'Category is required';
+    if (!formData.Jenis) {
+      newErrors.Jenis = 'Category is required';
     }
     
-    if (!formData.unit.trim()) {
-      newErrors.unit = 'Unit is required';
+    if (!formData.Satuan) {
+      newErrors.Satuan = 'Unit is required';
     }
     
-    if (formData.price < 0) {
-      newErrors.price = 'Price cannot be negative';
+    if (formData.Harga < 0) {
+      newErrors.Harga = 'Price cannot be negative';
     }
     
-    if (formData.stock < 0) {
-      newErrors.stock = 'Stock cannot be negative';
+    if (formData.Stok < 0) {
+      newErrors.Stok = 'Stock cannot be negative';
     }
     
-    if (formData.min_stock < 0) {
-      newErrors.min_stock = 'Minimum stock cannot be negative';
+    if (formData.Stok_Minimum < 0) {
+      newErrors.Stok_Minimum = 'Minimum stock cannot be negative';
     }
     
     setErrors(newErrors);
@@ -109,13 +111,38 @@ export default function ProductForm({ product = null, onSuccess, onCancel }) {
     try {
       let response;
       
+      // Format the data correctly for the backend
+      const productData = {
+        product: {
+          Kode_Item: formData.Kode_Item,
+          Nama_Item: formData.Nama_Item,
+          Jenis: formData.Jenis,
+          Supplier_Code: formData.Supplier_Code,
+          Supplier_Name: formData.Supplier_Name,
+          Satuan: formData.Satuan,
+          Harga: formData.Harga,
+          Stok: formData.Stok,
+          Barcode: formData.Barcode,
+          Stok_Minimum: formData.Stok_Minimum
+        },
+        variants: [],
+        units: [
+          {
+            Nama_Satuan: formData.Satuan,
+            Jumlah_Dalam_Satuan_Dasar: 1.0
+          }
+        ]
+      };
+      
+      console.log('Sending product data:', productData);
+      
       if (isEditMode) {
         // Update existing product
-        response = await productApi.update(product.id, formData);
+        response = await productItemApi.updateProduct(product.ID_Produk, productData);
         toast.success('Product updated successfully');
       } else {
         // Create new product
-        response = await productApi.create(formData);
+        response = await productItemApi.createProduct(productData);
         toast.success('Product created successfully');
       }
       
@@ -129,22 +156,13 @@ export default function ProductForm({ product = null, onSuccess, onCancel }) {
       if (error.response && error.response.data) {
         const apiErrors = error.response.data;
         
-        if (apiErrors.detail) {
-          toast.error(apiErrors.detail);
+        if (apiErrors.error) {
+          toast.error(apiErrors.error.message || 'Failed to save product');
         } else {
           toast.error('Failed to save product');
         }
-        
-        // Map API validation errors to form fields
-        if (apiErrors.errors) {
-          const fieldErrors = {};
-          apiErrors.errors.forEach(err => {
-            fieldErrors[err.field] = err.message;
-          });
-          setErrors(fieldErrors);
-        }
       } else {
-        toast.error('An error occurred while saving the product');
+        toast.error('Failed to save product');
       }
     } finally {
       setIsLoading(false);
@@ -152,215 +170,189 @@ export default function ProductForm({ product = null, onSuccess, onCancel }) {
   };
   
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Product Code */}
-        <div>
-          <label htmlFor="product_code" className="block text-sm font-medium text-gray-700 mb-1">
-            Product Code <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="text"
-            id="product_code"
-            name="product_code"
-            value={formData.product_code}
-            onChange={handleChange}
-            className={`w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-              errors.product_code ? 'border-red-500' : 'border-gray-300'
-            }`}
-            disabled={isEditMode} // Don't allow editing product code in edit mode
-          />
-          {errors.product_code && (
-            <p className="mt-1 text-sm text-red-500">{errors.product_code}</p>
-          )}
-        </div>
-        
-        {/* Product Name */}
-        <div>
-          <label htmlFor="product_name" className="block text-sm font-medium text-gray-700 mb-1">
-            Product Name <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="text"
-            id="product_name"
-            name="product_name"
-            value={formData.product_name}
-            onChange={handleChange}
-            className={`w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-              errors.product_name ? 'border-red-500' : 'border-gray-300'
-            }`}
-          />
-          {errors.product_name && (
-            <p className="mt-1 text-sm text-red-500">{errors.product_name}</p>
-          )}
-        </div>
-        
-        {/* Category */}
-        <div>
-          <label htmlFor="category" className="block text-sm font-medium text-gray-700 mb-1">
-            Category <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="text"
-            id="category"
-            name="category"
-            value={formData.category}
-            onChange={handleChange}
-            className={`w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-              errors.category ? 'border-red-500' : 'border-gray-300'
-            }`}
-          />
-          {errors.category && (
-            <p className="mt-1 text-sm text-red-500">{errors.category}</p>
-          )}
-        </div>
-        
-        {/* Unit */}
-        <div>
-          <label htmlFor="unit" className="block text-sm font-medium text-gray-700 mb-1">
-            Unit <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="text"
-            id="unit"
-            name="unit"
-            value={formData.unit}
-            onChange={handleChange}
-            className={`w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-              errors.unit ? 'border-red-500' : 'border-gray-300'
-            }`}
-          />
-          {errors.unit && (
-            <p className="mt-1 text-sm text-red-500">{errors.unit}</p>
-          )}
-        </div>
-        
-        {/* Price */}
-        <div>
-          <label htmlFor="price" className="block text-sm font-medium text-gray-700 mb-1">
-            Price <span className="text-red-500">*</span>
-          </label>
-          <div className="relative">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <span className="text-gray-500">Rp</span>
-            </div>
-            <input
-              type="number"
-              id="price"
-              name="price"
-              value={formData.price}
-              onChange={handleChange}
-              min="0"
-              step="0.01"
-              className={`w-full pl-10 pr-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                errors.price ? 'border-red-500' : 'border-gray-300'
-              }`}
-            />
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div>
+        <label className="block text-sm font-medium text-gray-700">
+          Product Code
+        </label>
+        <input
+          type="text"
+          name="Kode_Item"
+          value={formData.Kode_Item}
+          onChange={handleChange}
+          className={`mt-1 block w-full px-3 py-2 border ${errors.Kode_Item ? 'border-red-500' : 'border-gray-300'} rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm`}
+          disabled={isEditMode}
+        />
+        {errors.Kode_Item && (
+          <p className="mt-1 text-sm text-red-500">{errors.Kode_Item}</p>
+        )}
+      </div>
+      
+      <div>
+        <label className="block text-sm font-medium text-gray-700">
+          Product Name
+        </label>
+        <input
+          type="text"
+          name="Nama_Item"
+          value={formData.Nama_Item}
+          onChange={handleChange}
+          className={`mt-1 block w-full px-3 py-2 border ${errors.Nama_Item ? 'border-red-500' : 'border-gray-300'} rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm`}
+        />
+        {errors.Nama_Item && (
+          <p className="mt-1 text-sm text-red-500">{errors.Nama_Item}</p>
+        )}
+      </div>
+      
+      <div>
+        <label className="block text-sm font-medium text-gray-700">
+          Category
+        </label>
+        <input
+          type="text"
+          name="Jenis"
+          value={formData.Jenis}
+          onChange={handleChange}
+          className={`mt-1 block w-full px-3 py-2 border ${errors.Jenis ? 'border-red-500' : 'border-gray-300'} rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm`}
+        />
+        {errors.Jenis && (
+          <p className="mt-1 text-sm text-red-500">{errors.Jenis}</p>
+        )}
+      </div>
+      
+      <div>
+        <label className="block text-sm font-medium text-gray-700">
+          Unit
+        </label>
+        <input
+          type="text"
+          name="Satuan"
+          value={formData.Satuan}
+          onChange={handleChange}
+          className={`mt-1 block w-full px-3 py-2 border ${errors.Satuan ? 'border-red-500' : 'border-gray-300'} rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm`}
+        />
+        {errors.Satuan && (
+          <p className="mt-1 text-sm text-red-500">{errors.Satuan}</p>
+        )}
+      </div>
+      
+      <div>
+        <label className="block text-sm font-medium text-gray-700">
+          Price
+        </label>
+        <div className="relative">
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <span className="text-gray-500">Rp</span>
           </div>
-          {errors.price && (
-            <p className="mt-1 text-sm text-red-500">{errors.price}</p>
-          )}
-        </div>
-        
-        {/* Stock */}
-        <div>
-          <label htmlFor="stock" className="block text-sm font-medium text-gray-700 mb-1">
-            Stock <span className="text-red-500">*</span>
-          </label>
           <input
             type="number"
-            id="stock"
-            name="stock"
-            value={formData.stock}
+            name="Harga"
+            value={formData.Harga}
             onChange={handleChange}
             min="0"
-            className={`w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-              errors.stock ? 'border-red-500' : 'border-gray-300'
-            }`}
-          />
-          {errors.stock && (
-            <p className="mt-1 text-sm text-red-500">{errors.stock}</p>
-          )}
-        </div>
-        
-        {/* Supplier Code */}
-        <div>
-          <label htmlFor="supplier_code" className="block text-sm font-medium text-gray-700 mb-1">
-            Supplier Code
-          </label>
-          <input
-            type="text"
-            id="supplier_code"
-            name="supplier_code"
-            value={formData.supplier_code}
-            onChange={handleChange}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            step="0.01"
+            className={`mt-1 pl-10 pr-3 py-2 block w-full border ${errors.Harga ? 'border-red-500' : 'border-gray-300'} rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm`}
           />
         </div>
-        
-        {/* Barcode */}
-        <div>
-          <label htmlFor="barcode" className="block text-sm font-medium text-gray-700 mb-1">
-            Barcode
-          </label>
-          <input
-            type="text"
-            id="barcode"
-            name="barcode"
-            value={formData.barcode}
-            onChange={handleChange}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-        
-        {/* Minimum Stock */}
-        <div>
-          <label htmlFor="min_stock" className="block text-sm font-medium text-gray-700 mb-1">
-            Minimum Stock
-          </label>
-          <input
-            type="number"
-            id="min_stock"
-            name="min_stock"
-            value={formData.min_stock}
-            onChange={handleChange}
-            min="0"
-            className={`w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-              errors.min_stock ? 'border-red-500' : 'border-gray-300'
-            }`}
-          />
-          {errors.min_stock && (
-            <p className="mt-1 text-sm text-red-500">{errors.min_stock}</p>
-          )}
-        </div>
+        {errors.Harga && (
+          <p className="mt-1 text-sm text-red-500">{errors.Harga}</p>
+        )}
+      </div>
+      
+      <div>
+        <label className="block text-sm font-medium text-gray-700">
+          Stock
+        </label>
+        <input
+          type="number"
+          name="Stok"
+          value={formData.Stok}
+          onChange={handleChange}
+          min="0"
+          className={`mt-1 block w-full px-3 py-2 border ${errors.Stok ? 'border-red-500' : 'border-gray-300'} rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm`}
+        />
+        {errors.Stok && (
+          <p className="mt-1 text-sm text-red-500">{errors.Stok}</p>
+        )}
+      </div>
+      
+      <div>
+        <label className="block text-sm font-medium text-gray-700">
+          Supplier Code
+        </label>
+        <input
+          type="text"
+          name="Supplier_Code"
+          value={formData.Supplier_Code}
+          onChange={handleChange}
+          className={`mt-1 block w-full px-3 py-2 border ${errors.Supplier_Code ? 'border-red-500' : 'border-gray-300'} rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm`}
+        />
+        {errors.Supplier_Code && (
+          <p className="mt-1 text-sm text-red-500">{errors.Supplier_Code}</p>
+        )}
+      </div>
+      
+      <div>
+        <label className="block text-sm font-medium text-gray-700">
+          Supplier Name
+        </label>
+        <input
+          type="text"
+          name="Supplier_Name"
+          value={formData.Supplier_Name}
+          onChange={handleChange}
+          className={`mt-1 block w-full px-3 py-2 border ${errors.Supplier_Name ? 'border-red-500' : 'border-gray-300'} rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm`}
+        />
+        {errors.Supplier_Name && (
+          <p className="mt-1 text-sm text-red-500">{errors.Supplier_Name}</p>
+        )}
+      </div>
+      
+      <div>
+        <label className="block text-sm font-medium text-gray-700">
+          Barcode
+        </label>
+        <input
+          type="text"
+          name="Barcode"
+          value={formData.Barcode}
+          onChange={handleChange}
+          className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+        />
+      </div>
+      
+      <div>
+        <label className="block text-sm font-medium text-gray-700">
+          Minimum Stock
+        </label>
+        <input
+          type="number"
+          name="Stok_Minimum"
+          value={formData.Stok_Minimum}
+          onChange={handleChange}
+          min="0"
+          className={`mt-1 block w-full px-3 py-2 border ${errors.Stok_Minimum ? 'border-red-500' : 'border-gray-300'} rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm`}
+        />
+        {errors.Stok_Minimum && (
+          <p className="mt-1 text-sm text-red-500">{errors.Stok_Minimum}</p>
+        )}
       </div>
       
       <div className="flex justify-end space-x-3 pt-4">
         <button
           type="button"
           onClick={onCancel}
-          className="px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300 transition-colors"
+          className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+          disabled={isLoading}
         >
           Cancel
         </button>
         <button
           type="submit"
+          className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
           disabled={isLoading}
-          className={`px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors ${
-            isLoading ? 'opacity-70 cursor-not-allowed' : ''
-          }`}
         >
-          {isLoading ? (
-            <span className="flex items-center">
-              <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              Saving...
-            </span>
-          ) : (
-            isEditMode ? 'Update Product' : 'Create Product'
-          )}
+          {isLoading ? 'Saving...' : isEditMode ? 'Update Product' : 'Add Product'}
         </button>
       </div>
     </form>
