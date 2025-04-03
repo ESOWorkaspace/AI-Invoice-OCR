@@ -74,7 +74,8 @@ const ProductSearchDropdown = memo(({
                 units: product.units || [], // All available units
                 base_price: product.harga_pokok || product.base_price || 0, // Use harga_pokok instead of price
                 price: product.harga_pokok || product.base_price || 0, // Use harga_pokok for display too
-                supplier_code: product.supplier_code || ''
+                supplier_code: product.supplier_code || '',
+                unit_prices: product.unit_prices || {} // Include unit_prices from backend
               }))
               .filter(product => product.product_code !== '123' && product.product_name !== 'test');
             
@@ -160,6 +161,12 @@ const ProductSearchDropdown = memo(({
     if (index >= 0 && editableData?.output?.items) {
       const newEditableData = { ...editableData };
       
+      console.log('ProductSearchDropdown: Selected product:', product);
+      // Log detailed information about unit prices for debugging
+      if (product.unit_prices) {
+        console.log('ProductSearchDropdown: Backend provided these unit prices:', product.unit_prices);
+      }
+      
       // Update kode_barang_main if it exists
       if ('kode_barang_main' in newEditableData.output.items[index]) {
         newEditableData.output.items[index].kode_barang_main = {
@@ -183,15 +190,22 @@ const ProductSearchDropdown = memo(({
         const productUnit = product.units && product.units.length > 0 ? 
           product.units[0] : product.unit || '';
           
-        // Create a unit_prices object if the product has unit-specific prices
+        // Get the unit prices from the product data
         let unitPrices = {};
-        if (product.unit_prices) {
-          // If product already has unit_prices property, use it
+        
+        if (product.units_price) {
+          // Alternative property name that might be used
+          unitPrices = product.units_price;
+          console.log(`ProductSearchDropdown: Using provided units_price:`, unitPrices);
+        } else if (product.unit_prices) {
+          // Direct unit_prices mapping from backend (most explicit)
           unitPrices = product.unit_prices;
+          console.log(`ProductSearchDropdown: Using unit_prices directly from API:`, unitPrices);
         } else {
-          // Otherwise, create a default mapping with the same price for all units
-          // This ensures backward compatibility
+          // Fallback for backward compatibility - create a mapping with the same price for all units
           const basePrice = parseFloat(product.base_price) || 0;
+          console.log(`ProductSearchDropdown: No unit-specific prices found in API response, creating fallback mapping with base price ${basePrice}`);
+          
           if (product.units && product.units.length > 0) {
             product.units.forEach(unit => {
               unitPrices[unit] = basePrice;
@@ -199,13 +213,15 @@ const ProductSearchDropdown = memo(({
           } else if (product.unit) {
             unitPrices[product.unit] = basePrice;
           }
+          
+          console.log(`ProductSearchDropdown: Created fallback unit_prices:`, unitPrices);
         }
           
         newEditableData.output.items[index].satuan_main = {
           ...newEditableData.output.items[index].satuan_main,
           value: productUnit,
           is_confident: true,
-          available_units: product.units || [], // Store all available units
+          available_units: product.units || [product.unit].filter(Boolean), // Store all available units
           unit_prices: unitPrices // Store unit-specific prices
         };
       }
@@ -213,10 +229,13 @@ const ProductSearchDropdown = memo(({
       // If harga_dasar_main exists, update it with base_price
       if ('harga_dasar_main' in newEditableData.output.items[index]) {
         // Get the selected unit and its price
-        const selectedUnit = product.units && product.units.length > 0 ? 
-          product.units[0] : product.unit || '';
+        const selectedUnit = newEditableData.output.items[index]?.satuan_main?.value || 
+          (product.units && product.units.length > 0 ? product.units[0] : product.unit || '');
+          
         const unitPrices = newEditableData.output.items[index]?.satuan_main?.unit_prices || {};
-        const basePrice = unitPrices[selectedUnit] || parseFloat(product.base_price) || 0;
+        const basePrice = selectedUnit && unitPrices[selectedUnit] ? 
+          parseFloat(unitPrices[selectedUnit]) : 
+          parseFloat(product.base_price) || 0;
         
         console.log(`ProductSearchDropdown: Setting harga_dasar_main to ${basePrice} for unit ${selectedUnit}`);
         
@@ -320,7 +339,8 @@ const ProductSearchDropdown = memo(({
                     units: product.units || [], // All available units
                     base_price: product.harga_pokok || product.base_price || 0, // Use harga_pokok instead of harga_jual
                     price: product.harga_pokok || product.base_price || product.price || 0, // For backward compatibility 
-                    supplier_code: product.supplier_code || ''
+                    supplier_code: product.supplier_code || '',
+                    unit_prices: product.unit_prices || {} // Include unit_prices from backend
                   }))
                   .filter(product => product.product_code !== '123' && product.product_name !== 'test');
                 
@@ -353,7 +373,8 @@ const ProductSearchDropdown = memo(({
                     units: product.units || [], // All available units
                     base_price: product.harga_pokok || product.base_price || 0, // Use harga_pokok instead of harga_jual
                     price: product.harga_pokok || product.base_price || product.price || 0, // For backward compatibility 
-                    supplier_code: product.supplier_code || ''
+                    supplier_code: product.supplier_code || '',
+                    unit_prices: product.unit_prices || {} // Include unit_prices from backend
                   }))
                   .filter(product => product.product_code !== '123' && product.product_name !== 'test');
                 
@@ -392,7 +413,8 @@ const ProductSearchDropdown = memo(({
                     units: product.units || [], // All available units
                     base_price: product.harga_pokok || product.base_price || 0, // Use harga_pokok instead of harga_jual
                     price: product.harga_pokok || product.base_price || product.price || 0, // For backward compatibility
-                    supplier_code: product.supplier_code || ''
+                    supplier_code: product.supplier_code || '',
+                    unit_prices: product.unit_prices || {} // Include unit_prices from backend
                   }))
                   .filter(product => product.product_code !== '123' && product.product_name !== 'test');
                 
