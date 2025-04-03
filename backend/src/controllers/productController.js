@@ -336,7 +336,7 @@ exports.searchProducts = async (req, res) => {
     }
     
     // Parse the limit parameter
-    const limit = parseInt(requestLimit) || 10;
+    const limit = parseInt(requestLimit) || 0;
     
     // If limit is 0, return all matching products (no limit)
     const queryOptions = {

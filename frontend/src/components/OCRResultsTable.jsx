@@ -1,9 +1,18 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback, memo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
 import ReactDOM from 'react-dom';
-import DatePicker from 'react-datepicker';
-import 'react-datepicker/dist/react-datepicker.css';
 import axios from 'axios';
+import { safeGet } from '../utils/dataHelpers';
+import { parseNumber, formatCurrency } from '../utils/dataFormatters';
+import { BooleanField } from './UIComponents';
+import InvoiceHeader from './InvoiceHeader';
+import ItemsTable from './ItemsTable';
+import TotalsSection from './TotalsSection';
+import DebugSection from './DebugSection';
+import ProductSearchDropdown from './ProductSearchDropdown';
 
+/**
+ * Main component for OCR results table
+ */
 export default function OCRResultsTable({ data, onDataChange }) {
   // Initialize state with data or default values
   const [editableData, setEditableData] = useState(data || {});
@@ -16,9 +25,25 @@ export default function OCRResultsTable({ data, onDataChange }) {
   const [activeCell, setActiveCell] = useState(null);
   const activeCellRef = useRef(null);
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:1512';
+  const lastScrollY = useRef(0);
+  
+  // Restore scroll position when dropdown closes
+  useEffect(() => {
+    if (!dropdownOpen) {
+      // Don't reset the scroll position on dropdown close
+      // The tableScrollPosRef will handle this for the table container
+      return;
+    } else {
+      // When dropdown opens, save the current scroll position
+      lastScrollY.current = window.scrollY;
+    }
+  }, [dropdownOpen]);
   
   // Add a product cache to store previously fetched products
   const [productCache, setProductCache] = useState({});
+  
+  // Track processed invoice codes to avoid redundant searches
+  const processedInvoiceCodes = useRef(new Set()).current;
   
   // Normalize data structure if needed
   useEffect(() => {
@@ -97,6 +122,12 @@ export default function OCRResultsTable({ data, onDataChange }) {
             item.harga_jual_main.from_database = true;
           }
           
+          if (!item.harga_dasar_main) {
+            item.harga_dasar_main = { value: 0, is_confident: true, from_database: true };
+          } else {
+            item.harga_dasar_main.from_database = true;
+          }
+          
           if (!item.margin_persen) {
             item.margin_persen = { value: 0, is_confident: true, from_database: true };
           } else {
@@ -146,44 +177,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
     }
   }, [data]);
 
-  // Function to safely access nested properties
-  const safeGet = (obj, path, defaultValue = '') => {
-    try {
-      const result = path.split('.').reduce((o, key) => (o && o[key] !== undefined) ? o[key] : undefined, obj);
-      return result !== undefined ? result : defaultValue;
-    } catch (error) {
-      return defaultValue;
-    }
-  };
-
-  // Function to get background color based on confidence and database source
-  const getCellBackgroundColor = (cellData) => {
-    if (!cellData) return 'bg-white';
-    
-    // Fields from database should be green
-    if (cellData.from_database) {
-      return 'bg-green-100';
-    }
-    
-    // For null or empty values
-    if (cellData.value === null || cellData.value === '' || cellData.value === undefined) {
-      return 'bg-red-100';
-    }
-    
-    // For low confidence values
-    if (cellData.is_confident === false) {
-      return 'bg-orange-100';
-    }
-    
-    // For high confidence values
-    if (cellData.is_confident === true) {
-      return 'bg-white';
-    }
-    
-    // Default
-    return 'bg-white';
-  };
-
+  // Handle changes to header fields
   const handleHeaderChange = (field, value) => {
     const newData = { ...editableData };
     
@@ -197,96 +191,11 @@ export default function OCRResultsTable({ data, onDataChange }) {
       ...newData.output[field],
       value: value,
       is_confident: true,
-      _fieldName: field  // Store field name for reference in renderDatePicker
+      _fieldName: field
     };
     
-    // Validate dates if this is a date field
-    if (field === 'tanggal_faktur' || field === 'tgl_jatuh_tempo') {
-      const invoiceDateValue = parseDate(newData.output.tanggal_faktur?.value);
-      const dueDateValue = parseDate(newData.output.tgl_jatuh_tempo?.value);
-      
-      // Only validate if both dates exist
-      if (invoiceDateValue && dueDateValue) {
-        if (invoiceDateValue > dueDateValue) {
-          // Show warning but don't prevent the change
-          console.warn('Tanggal faktur tidak boleh lebih dari tanggal jatuh tempo');
-          
-          // You can add a toast notification here if desired
-          // toast.warning('Tanggal faktur tidak boleh lebih dari tanggal jatuh tempo');
-        }
-      }
-    }
-    
     setEditableData(newData);
-    onDataChange(newData);
-  };
-
-  // Utility functions
-  const parseNumber = (value) => {
-    if (typeof value === 'number') return value;
-    if (typeof value === 'string') {
-      // Handle Indonesian number format (dots as thousand separators, comma as decimal)
-      // First, remove all dots
-      let cleanValue = value.replace(/\./g, '');
-      // Then, replace comma with dot for decimal
-      cleanValue = cleanValue.replace(/,/g, '.');
-      // Convert to number
-      const result = Number(cleanValue);
-      // Return the number or 0 if it's NaN
-      return isNaN(result) ? 0 : result;
-    }
-    return 0;
-  };
-
-  const formatCurrency = (value) => {
-    // Ensure we're working with a number
-    const numValue = typeof value === 'number' ? value : parseNumber(value);
-    // Format using Indonesian locale (dots for thousands, comma for decimal)
-    return new Intl.NumberFormat('id-ID', { 
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 2
-    }).format(numValue);
-  };
-
-  const parseDate = (value) => {
-    if (!value) return null;
-    
-    // Handle epoch timestamp (number)
-    if (typeof value === 'number') {
-      return new Date(value);
-    }
-    
-    // Handle string dates
-    if (typeof value === 'string') {
-      // Try parsing dd-mm-yyyy
-      const ddmmyyyyMatch = value.match(/^(\d{2})-(\d{2})-(\d{4})$/);
-      if (ddmmyyyyMatch) {
-        return new Date(ddmmyyyyMatch[3], ddmmyyyyMatch[2] - 1, ddmmyyyyMatch[1]);
-      }
-      
-      // Try parsing yyyy-mm-dd
-      const yyyymmddMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-      if (yyyymmddMatch) {
-        return new Date(yyyymmddMatch[1], yyyymmddMatch[2] - 1, yyyymmddMatch[3]);
-      }
-    }
-    
-    // Try direct Date parsing as fallback
-    const date = new Date(value);
-    return isNaN(date.getTime()) ? null : date;
-  };
-
-  const formatDateDisplay = (value) => {
-    if (!value) return '';
-    
-    const date = parseDate(value);
-    if (!date || isNaN(date.getTime())) return '';
-    
-    const day = String(date.getDate()).padStart(2, '0');
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = date.getFullYear();
-    
-    return `${day}-${month}-${year}`;
+    if (onDataChange) onDataChange(newData);
   };
 
   // Memoize the search function to prevent dependency issues
@@ -337,8 +246,8 @@ export default function OCRResultsTable({ data, onDataChange }) {
         }
         
         if (product.price) {
-          newData.output.items[itemIndex].harga_jual_main = {
-            ...newData.output.items[itemIndex].harga_jual_main,
+          newData.output.items[itemIndex].harga_dasar_main = {
+            ...newData.output.items[itemIndex].harga_dasar_main,
             value: parseFloat(product.price),
             is_confident: true
           };
@@ -421,8 +330,8 @@ export default function OCRResultsTable({ data, onDataChange }) {
             }
             
             if (product.price) {
-              newData.output.items[itemIndex].harga_jual_main = {
-                ...newData.output.items[itemIndex].harga_jual_main,
+              newData.output.items[itemIndex].harga_dasar_main = {
+                ...newData.output.items[itemIndex].harga_dasar_main,
                 value: parseFloat(product.price),
                 is_confident: true
               };
@@ -436,69 +345,32 @@ export default function OCRResultsTable({ data, onDataChange }) {
             ...prev,
             [itemIndex]: 'found'
           }));
-          
-          console.log(`[searchProductByInvoiceCode] Found product for invoice code: ${invoiceCode}`, product);
         } else {
-          // No product found - mark for manual search and set placeholder values
-          const newData = { ...editableData };
-          
-          // Set empty values with "tidak ditemukan, cari..." as their visual representation
-          if (newData.output.items && newData.output.items[itemIndex]) {
-            // Clear the kode_barang_main and nama_barang_main fields
-            newData.output.items[itemIndex].kode_barang_main = {
-              ...newData.output.items[itemIndex].kode_barang_main,
-              value: '', // Empty value that will show placeholder
-              is_confident: false
-            };
-            
-            newData.output.items[itemIndex].nama_barang_main = {
-              ...newData.output.items[itemIndex].nama_barang_main,
-              value: '', // Empty value that will show placeholder
-              is_confident: false
-            };
-            
-            setEditableData(newData);
-            if (onDataChange) onDataChange(newData);
-          }
-          
+          // No results found
+          console.warn(`No products found for invoice code: ${invoiceCode}`);
           setSearchStatus(prev => ({
             ...prev,
             [itemIndex]: 'not_found'
           }));
-          
-          console.log(`[searchProductByInvoiceCode] No product found for invoice code: ${invoiceCode}`);
         }
+        
+        // Remove from pending searches
+        setPendingSearches(prev => {
+          const newPending = { ...prev };
+          delete newPending[itemIndex];
+          return newPending;
+        });
       })
       .catch(error => {
-        console.error(`[searchProductByInvoiceCode] Error searching for product with invoice code ${invoiceCode}:`, error);
+        console.error(`Error searching for product with invoice code ${invoiceCode}:`, error);
         
-        // Set empty values with placeholders on error too
-        const newData = { ...editableData };
-        
-        if (newData.output.items && newData.output.items[itemIndex]) {
-          newData.output.items[itemIndex].kode_barang_main = {
-            ...newData.output.items[itemIndex].kode_barang_main,
-            value: '', // Empty value that will show placeholder
-            is_confident: false
-          };
-          
-          newData.output.items[itemIndex].nama_barang_main = {
-            ...newData.output.items[itemIndex].nama_barang_main,
-            value: '', // Empty value that will show placeholder
-            is_confident: false
-          };
-          
-          setEditableData(newData);
-          if (onDataChange) onDataChange(newData);
-        }
-        
+        // Set search status to error
         setSearchStatus(prev => ({
           ...prev,
           [itemIndex]: 'error'
         }));
-      })
-      .finally(() => {
-        // Remove from pending searches when done (whether found or not)
+        
+        // Remove from pending searches
         setPendingSearches(prev => {
           const newPending = { ...prev };
           delete newPending[itemIndex];
@@ -506,92 +378,156 @@ export default function OCRResultsTable({ data, onDataChange }) {
         });
       });
     } catch (error) {
-      console.error(`[searchProductByInvoiceCode] Exception while searching for invoice code ${invoiceCode}:`, error);
+      console.error('Error in searchProductByInvoiceCode:', error);
       
-      // Update search status to error
+      // Set search status to error
       setSearchStatus(prev => ({
         ...prev,
         [itemIndex]: 'error'
       }));
       
-      // Remove from pending searches on exception
+      // Remove from pending searches
       setPendingSearches(prev => {
         const newPending = { ...prev };
         delete newPending[itemIndex];
         return newPending;
       });
     }
-  }, [API_BASE_URL, editableData, onDataChange, productCache]);
+  }, [API_BASE_URL, editableData, onDataChange, productCache, setProductCache, setProductMapping, setSearchStatus, setPendingSearches]);
 
-  // Add a state to track which invoice codes have already been processed
-  const [processedInvoiceCodes, setProcessedInvoiceCodes] = useState({});
-
-  // Handle automatic search for items when data changes
-  useEffect(() => {
-    // Skip if no items or pendingSearches is already populated
-    if (!editableData?.output?.items || Object.keys(pendingSearches).length > 0) return;
+  // Handle changes to item fields
+  const handleItemChange = useCallback((rowIndex, field, value) => {
+    const newData = { ...editableData };
     
-    // Find items that need to be searched automatically
-    const itemsToSearch = [];
-    
-    editableData.output.items.forEach((item, index) => {
-      // Get the invoice code from kode_barang_invoice
-      const kodeInvoice = safeGet(item, 'kode_barang_invoice.value', '');
+    // Update the field value
+    if (newData.output.items && newData.output.items[rowIndex]) {
+      newData.output.items[rowIndex][field] = {
+        ...newData.output.items[rowIndex][field],
+        value: value,
+        is_confident: true
+      };
       
-      // Check if we have a valid invoice code to search
-      if (kodeInvoice && 
-          // Ensure this code hasn't been processed already
-          !processedInvoiceCodes[kodeInvoice]) {
-        
-        // Mark this invoice code as processed
-        setProcessedInvoiceCodes(prev => ({
-          ...prev,
-          [kodeInvoice]: true
-        }));
-        
-        // Add to the items that need searching
-        itemsToSearch.push({
-          index,
-          kodeInvoice
-        });
-        
-        // Add to pending searches to track
-        setPendingSearches(prev => ({
-          ...prev,
-          [index]: true
-        }));
+      // Special case for kode_barang_invoice
+      // If this field changes and there's a valid value, try to search for the product
+      if (field === 'kode_barang_invoice' && value) {
+        // Check if we already have this product in cache
+        if (productCache[value]) {
+          // Use cached product
+          const product = productCache[value];
+          
+          newData.output.items[rowIndex].kode_barang_main = {
+            ...newData.output.items[rowIndex].kode_barang_main,
+            value: product.product_code || '',
+            is_confident: true
+          };
+          
+          newData.output.items[rowIndex].nama_barang_main = {
+            ...newData.output.items[rowIndex].nama_barang_main,
+            value: product.product_name || '',
+            is_confident: true
+          };
+          
+          if (product.unit) {
+            newData.output.items[rowIndex].satuan_main = {
+              ...newData.output.items[rowIndex].satuan_main,
+              value: product.unit,
+              is_confident: true
+            };
+          }
+          
+          if (product.price) {
+            newData.output.items[rowIndex].harga_dasar_main = {
+              ...newData.output.items[rowIndex].harga_dasar_main,
+              value: parseFloat(product.price),
+              is_confident: true
+            };
+          }
+          
+          // Set search status
+          setSearchStatus(prev => ({
+            ...prev,
+            [rowIndex]: 'found'
+          }));
+        } else {
+          // Need to search for product
+          setPendingSearches(prev => ({
+            ...prev,
+            [rowIndex]: value
+          }));
+          
+          // Mark as searching
+          setSearchStatus(prev => ({
+            ...prev,
+            [rowIndex]: 'searching'
+          }));
+          
+          // Call search function
+          searchProductByInvoiceCode(value, rowIndex);
+        }
       }
-    });
+    }
     
-    if (itemsToSearch.length === 0) {
-      console.log('No items need automatic searching');
+    setEditableData(newData);
+    if (onDataChange) onDataChange(newData);
+  }, [editableData, onDataChange, productCache, searchProductByInvoiceCode]);
+
+  // Handle effect for auto-searching products based on invoice codes
+  useEffect(() => {
+    // Skip if there are no items or if we're already searching for something
+    if (!editableData?.output?.items || Object.keys(pendingSearches).length > 0) {
       return;
     }
     
-    // Deduplicate invoice codes for efficiency
-    const uniqueInvoiceCodesToSearch = itemsToSearch.reduce((acc, item) => {
-      if (!acc.some(i => i.kodeInvoice === item.kodeInvoice)) {
-        acc.push(item);
-      }
-      return acc;
-    }, []);
+    // Check which items need to be searched
+    const itemsToSearch = [];
     
-    console.log(`Found ${uniqueInvoiceCodesToSearch.length} unique invoice codes to search`);
+    editableData.output.items.forEach((item, index) => {
+      const invoiceCode = safeGet(item, 'kode_barang_invoice.value', '');
+      const mainCode = safeGet(item, 'kode_barang_main.value', '');
+      
+      // Skip items that don't have an invoice code or already have a main code
+      if (!invoiceCode || mainCode || processedInvoiceCodes.has(invoiceCode)) {
+        return;
+      }
+      
+      // Add to the list of items to search
+      itemsToSearch.push({ index, invoiceCode });
+      processedInvoiceCodes.add(invoiceCode);
+    });
+    
+    // No items to search
+    if (itemsToSearch.length === 0) {
+      return;
+    }
+    
+    // Set status to searching for these items
+    itemsToSearch.forEach(({ index }) => {
+      setSearchStatus(prev => ({
+        ...prev,
+        [index]: 'searching'
+      }));
+      
+      setPendingSearches(prev => ({
+        ...prev,
+        [index]: true
+      }));
+    });
     
     // Use setTimeout to ensure searchProductByInvoiceCode is defined
     setTimeout(() => {
       try {
-        // Check if searchProductByInvoiceCode is defined before using it
         if (typeof searchProductByInvoiceCode === 'function') {
-          console.log('Performing auto-search for all pending items');
-          // Perform searches for identified items with cache check
-          uniqueInvoiceCodesToSearch.forEach(({ index, kodeInvoice }) => {
+          // Search for each item
+          itemsToSearch.forEach(({ index, invoiceCode }) => {
             try {
-              // Check if product is in cache
-              if (productCache[kodeInvoice]) {
-                console.log(`Using cached data for invoice code: ${kodeInvoice} at index ${index}`);
-                // Use cached data
-                const product = productCache[kodeInvoice];
+              // Check if already in cache
+              if (productCache[invoiceCode]) {
+                console.log(`Using cache for invoice code ${invoiceCode} in auto-search`);
+                
+                // Use cached product
+                const product = productCache[invoiceCode];
+                
+                // Update item data
                 const newData = { ...editableData };
                 
                 if (newData.output.items && newData.output.items[index]) {
@@ -607,7 +543,6 @@ export default function OCRResultsTable({ data, onDataChange }) {
                     is_confident: true
                   };
                   
-                  // Update other fields if available
                   if (product.unit) {
                     newData.output.items[index].satuan_main = {
                       ...newData.output.items[index].satuan_main,
@@ -617,8 +552,8 @@ export default function OCRResultsTable({ data, onDataChange }) {
                   }
                   
                   if (product.price) {
-                    newData.output.items[index].harga_jual_main = {
-                      ...newData.output.items[index].harga_jual_main,
+                    newData.output.items[index].harga_dasar_main = {
+                      ...newData.output.items[index].harga_dasar_main,
                       value: parseFloat(product.price),
                       is_confident: true
                     };
@@ -641,7 +576,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
                 });
               } else {
                 // Not in cache, perform API search
-                searchProductByInvoiceCode(kodeInvoice, index);
+                searchProductByInvoiceCode(invoiceCode, index);
               }
             } catch (itemError) {
               console.error(`Error searching for item ${index}:`, itemError);
@@ -676,135 +611,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
         });
       }
     }, 0);
-  }, [editableData?.output?.items, pendingSearches, productCache, searchProductByInvoiceCode, processedInvoiceCodes]);
-
-  // Memoize the item change handler to prevent unnecessary re-renders
-  const handleItemChange = useCallback((index, field, value) => {
-    console.log('handleItemChange called for field:', field, 'at index:', index);
-    const newData = { ...editableData };
-    if (index === -1) {
-      // Handle header fields
-      newData.output[field] = {
-        ...newData.output[field],
-        value: value,
-        is_confident: true
-      };
-    } else {
-      // Handle item fields
-      if (newData.output.items && newData.output.items[index]) {
-        newData.output.items[index][field] = {
-          ...newData.output.items[index][field],
-          value: value,
-          is_confident: true
-        };
-        
-        // Special case: If kode_barang_invoice is changed, try to find a matching product
-        if (field === 'kode_barang_invoice' && value) {
-          const currentInvoiceCode = value;
-          console.log('Need to search for product with invoice code:', currentInvoiceCode);
-          
-          // Check if we already have this invoice code in the cache
-          if (productCache[currentInvoiceCode]) {
-            console.log(`Using cache for invoice code ${currentInvoiceCode} in handleItemChange`);
-            
-            // Use cached product data
-            const product = productCache[currentInvoiceCode];
-            
-            // Update fields with cached data
-            newData.output.items[index].kode_barang_main = {
-              ...newData.output.items[index].kode_barang_main,
-              value: product.product_code || '',
-              is_confident: true
-            };
-            
-            newData.output.items[index].nama_barang_main = {
-              ...newData.output.items[index].nama_barang_main,
-              value: product.product_name || '',
-              is_confident: true
-            };
-            
-            // Update other fields if available
-            if (product.unit) {
-              newData.output.items[index].satuan_main = {
-                ...newData.output.items[index].satuan_main,
-                value: product.unit,
-                is_confident: true
-              };
-            }
-            
-            if (product.price) {
-              newData.output.items[index].harga_jual_main = {
-                ...newData.output.items[index].harga_jual_main,
-                value: parseFloat(product.price),
-                is_confident: true
-              };
-            }
-            
-            // Update search status
-            setSearchStatus(prev => ({
-              ...prev,
-              [index]: 'found'
-            }));
-            
-            // No need to make an API call
-            setEditableData(newData);
-            onDataChange(newData);
-            return;
-          }
-          
-          // Not in cache, need to search via API
-          
-          // Clear any existing search status 
-          setSearchStatus(prev => ({
-            ...prev,
-            [index]: undefined
-          }));
-          
-          // Clear pending searches for this index
-          setPendingSearches(prev => {
-            const newPending = { ...prev };
-            delete newPending[index];
-            return newPending;
-          });
-          
-          // Add to pending searches
-          setPendingSearches(prev => ({
-            ...prev,
-            [index]: true
-          }));
-          
-          // Using setTimeout to ensure this happens after searchProductByInvoiceCode is defined
-          setTimeout(() => {
-            try {
-              // Defensive check to make sure searchProductByInvoiceCode exists
-              if (typeof searchProductByInvoiceCode === 'function') {
-                console.log('Calling searchProductByInvoiceCode for invoice code:', currentInvoiceCode);
-                searchProductByInvoiceCode(currentInvoiceCode, index);
-              } else {
-                console.warn('searchProductByInvoiceCode is not defined yet, will try again later');
-                // Remove from pending searches if we can't search now
-                setPendingSearches(prev => {
-                  const newPending = { ...prev };
-                  delete newPending[index];
-                  return newPending;
-                });
-              }
-            } catch (error) {
-              console.error('Error calling searchProductByInvoiceCode:', error);
-              // Also remove from pending searches on error
-              setPendingSearches(prev => {
-                const newPending = { ...prev };
-                delete newPending[index];
-                return newPending;
-              });
-            }
-          }, 0);
-        }
-      }
-    }
-    setEditableData(newData);
-    onDataChange(newData);
-  }, [editableData, onDataChange, productCache, searchProductByInvoiceCode]);
+  }, [editableData?.output?.items, pendingSearches, productCache, searchProductByInvoiceCode, processedInvoiceCodes, onDataChange]);
 
   // Handle BKP change and update PPN
   const handleBKPChange = (rowIndex, value) => {
@@ -1360,10 +1167,10 @@ export default function OCRResultsTable({ data, onDataChange }) {
           {`
           .resizer {
             position: absolute;
-            right: -5px;
+            right: -8px;
             top: 0;
             height: 100%;
-            width: 10px;
+            width: 16px;
             cursor: col-resize;
             user-select: none;
             touch-action: none;
@@ -1634,7 +1441,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
         return (
           <input
             type="text"
-            value={formatCurrency(item.value)}
+            value={item.value !== null && item.value !== undefined ? formatCurrency(item.value) : ''}
             onChange={(e) => {
               const val = parseNumber(e.target.value);
               onChange(val);
@@ -1647,7 +1454,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
         return (
           <input
             type="text"
-            value={typeof item.value === 'number' ? item.value.toString().replace('.', ',') : item.value}
+            value={typeof item.value === 'number' ? item.value.toString().replace('.', ',') : (item.value || '')}
             onChange={(e) => {
               // Allow only numbers and one comma as decimal separator
               let val = e.target.value.replace(/[^0-9,]/g, '');
@@ -1668,7 +1475,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
         return (
           <input
             type="text"
-            value={item.value || ''}
+            value={item.value !== undefined && item.value !== null ? item.value : ''}
             onChange={(e) => onChange(e.target.value)}
             className={`w-full bg-transparent border-none p-0 focus:ring-0 focus:outline-none ${cellClass}`}
           />
@@ -1684,7 +1491,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
     { id: 'kode_barang_main', header: 'Kode Main', width: 120, sticky: true, left: 40 },
     { id: 'nama_barang_main', header: 'Nama Main', width: 250, sticky: true, left: 160 },
     { id: 'qty', header: 'Qty', width: 80, type: 'currency', align: 'right' },
-    { id: 'satuan', header: 'Satuan', width: 80, align: 'center' },
+    { id: 'satuan', header: 'Satuan Invoice', width: 80, align: 'center' },
     { id: 'satuan_main', header: 'SATUAN MAIN', width: 120, align: 'center', special: 'database' },
     { id: 'harga_satuan', header: 'Harga Satuan', width: 120, type: 'currency', align: 'right' },
     { id: 'harga_bruto', header: 'Harga Bruto', width: 120, type: 'currency', align: 'right' },
@@ -1693,11 +1500,11 @@ export default function OCRResultsTable({ data, onDataChange }) {
     { id: 'jumlah_netto', header: 'Jumlah Netto', width: 120, type: 'currency', align: 'right' },
     { id: 'bkp', header: 'BKP', width: 80, type: 'boolean', align: 'center' },
     { id: 'ppn', header: 'PPN', width: 100, type: 'currency', align: 'right' },
-    { id: 'harga_jual_main', header: 'Harga Dasar', width: 150, type: 'currency', align: 'right', special: 'database' },
+    { id: 'harga_dasar_main', header: 'Harga Dasar', width: 150, type: 'currency', align: 'right', special: 'database' },
     { id: 'margin_persen', header: 'Margin %', width: 100, type: 'percentage', align: 'right', special: 'database' },
     { id: 'margin_rp', header: 'Margin Rp', width: 120, type: 'currency', align: 'right', special: 'database' },
-    { id: 'kenaikan_persen', header: 'Kenaikan %', width: 100, type: 'percentage', align: 'right' },
-    { id: 'kenaikan_rp', header: 'Kenaikan Rp', width: 120, type: 'currency', align: 'right' },
+    { id: 'kenaikan_persen', header: 'Perbedaan %', width: 100, type: 'percentage', align: 'right' },
+    { id: 'kenaikan_rp', header: 'Perbedaan Rp', width: 120, type: 'currency', align: 'right' },
     { id: 'saran_margin_persen', header: 'Saran Margin %', width: 120, type: 'percentage', align: 'right', special: 'suggestion' },
     { id: 'saran_margin_rp', header: 'Saran Margin Rp', width: 120, type: 'currency', align: 'right', special: 'suggestion' },
   ];
@@ -1815,6 +1622,9 @@ export default function OCRResultsTable({ data, onDataChange }) {
 
   // Memoize the handler to avoid recreation during re-renders
   const handleProductCellClick = useCallback((cellType, rowIndex) => {
+    // Store current scroll position before opening dropdown
+    lastScrollY.current = window.scrollY;
+    
     // Close any existing dropdown first
     setDropdownOpen(false);
     
@@ -1834,545 +1644,18 @@ export default function OCRResultsTable({ data, onDataChange }) {
     }
   }, []);
 
-  // Product Search Dropdown Component
-  const ProductSearchDropdown = memo(({ onClose, activeCellRef, activeCell, editableData, setEditableData, onDataChange, API_BASE_URL }) => {
-    const [searchTerm, setSearchTerm] = useState('');
-    const [searchResults, setSearchResults] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const [initialItems, setInitialItems] = useState([]);
-    const [displayedItems, setDisplayedItems] = useState([]);
-    const [hasMore, setHasMore] = useState(false);
-    const [isLoadingMore, setIsLoadingMore] = useState(false);
-    const [lastSearchTerm, setLastSearchTerm] = useState('');
-    const [searchCache, setSearchCache] = useState({});
-    const searchDebounceTimer = useRef(null);
-    const scrollContainerRef = useRef(null);
-    const dropdownRef = useRef(null);
-    const inputRef = useRef(null);
-    
-    // Initial focus on input field
-    useEffect(() => {
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
-    }, []);
-    
-    // Load initial items for the dropdown
-    useEffect(() => {
-      const controller = new AbortController();
-      const loadItems = async () => {
-        try {
-          // No need to load items if we have an active search term
-          if (searchTerm) return;
-          
-          setLoading(true);
-          
-          // Use the invoice code from the data if it's available
-          // This helps with automatic matching
-          const invoiceCode = activeCell?.rowIndex !== undefined
-            ? safeGet(editableData, `output.items[${activeCell.rowIndex}].kode_barang_invoice.value`, '')
-            : '';
-          
-          // Only search for initial items if we have an invoice code
-          if (invoiceCode) {
-            // Search by invoice code to automatically suggest matching products
-            const response = await axios.get(`${API_BASE_URL}/api/products/search`, {
-              params: {
-                search: invoiceCode,
-                limit: 0 // Request all matching items without limit
-              },
-              signal: controller.signal
-            });
-            
-            if (response?.data?.success && Array.isArray(response.data.data)) {
-              const items = response.data.data
-                .map(product => ({
-                  product_code: product.kode_main || product.product_code || '',
-                  product_name: product.nama_main || product.product_name || '',
-                  unit: product.unit || '',
-                  units: product.units || [], // All available units
-                  base_price: product.harga_pokok || product.base_price || 0, // Use harga_pokok instead of price
-                  price: product.harga_pokok || product.base_price || 0, // Use harga_pokok for display too
-                  supplier_code: product.supplier_code || ''
-                }))
-                .filter(product => product.product_code !== '123' && product.product_name !== 'test');
-              
-              console.log(`[ProductSearchDropdown] Found ${items.length} initial items matching invoice code: "${invoiceCode}"`);
-              
-              setInitialItems(items);
-              setDisplayedItems(items); // Initialize with all items since we don't have a display limit
-              setHasMore(false); // No need for "load more" since we're showing all items
-            } else {
-              setInitialItems([]);
-              setDisplayedItems([]);
-              setHasMore(false);
-            }
-          } else {
-            // No invoice code, set empty initial items
-            setInitialItems([]);
-            setDisplayedItems([]);
-            setHasMore(false);
-          }
-        } catch (error) {
-          console.error('[ProductSearchDropdown] Error loading initial items:', error);
-          setInitialItems([]);
-          setDisplayedItems([]);
-          setHasMore(false);
-        } finally {
-          setLoading(false);
-        }
-      };
-      
-      loadItems();
-      
-      return () => {
-        controller.abort();
-      };
-    }, [API_BASE_URL, activeCell, editableData]);
-    
-    // Set up scroll listener for infinite scrolling
-    useEffect(() => {
-      const container = scrollContainerRef.current;
-      if (!container) return;
-      
-      const handleScroll = () => {
-        if (
-          !loading &&
-          !isLoadingMore &&
-          hasMore &&
-          container.scrollHeight - container.scrollTop <= container.clientHeight + 100
-        ) {
-          loadMoreItems();
-        }
-      };
-      
-      // Add scroll event listener
-      container.addEventListener('scroll', handleScroll);
-      
-      // Clean up
-      return () => {
-        container.removeEventListener('scroll', handleScroll);
-      };
-    }, [loading, isLoadingMore, hasMore]);
-    
-    // Load more items when requested (infinite scroll)
-    const loadMoreItems = useCallback(() => {
-      if (isLoadingMore || !hasMore) return;
-      
-      setIsLoadingMore(true);
-      
-      // Simply display more of the existing results
-      const currentlyDisplayed = displayedItems.length;
-      const nextBatch = searchResults.slice(currentlyDisplayed, currentlyDisplayed + 20);
-      
-      setDisplayedItems(prev => [...prev, ...nextBatch]);
-      setHasMore(currentlyDisplayed + nextBatch.length < searchResults.length);
-      setIsLoadingMore(false);
-    }, [displayedItems, searchResults, isLoadingMore, hasMore]);
-    
-    // Handle item selection
-    const handleItemSelect = useCallback((product) => {
-      if (!activeCell || activeCell.index === undefined) return;
-      
-      const index = activeCell.index;
-      
-      if (index >= 0 && editableData?.output?.items) {
-        const newEditableData = { ...editableData };
-        
-        // Update kode_barang_main if it exists
-        if ('kode_barang_main' in newEditableData.output.items[index]) {
-          newEditableData.output.items[index].kode_barang_main = {
-            ...newEditableData.output.items[index].kode_barang_main,
-            value: product.product_code,
-            is_confident: true
-          };
-        }
-        
-        // Update nama_barang_main if it exists
-        if ('nama_barang_main' in newEditableData.output.items[index]) {
-          newEditableData.output.items[index].nama_barang_main = {
-            ...newEditableData.output.items[index].nama_barang_main,
-            value: product.product_name,
-            is_confident: true
-          };
-        }
-        
-        // Update satuan_main if it exists
-        if ('satuan_main' in newEditableData.output.items[index]) {
-          const productUnit = product.units && product.units.length > 0 ? 
-            product.units[0] : product.unit || '';
-            
-          // Create a unit_prices object if the product has unit-specific prices
-          let unitPrices = {};
-          if (product.unit_prices) {
-            // If product already has unit_prices property, use it
-            unitPrices = product.unit_prices;
-          } else {
-            // Otherwise, create a default mapping with the same price for all units
-            // This ensures backward compatibility
-            const basePrice = parseFloat(product.base_price) || 0;
-            if (product.units && product.units.length > 0) {
-              product.units.forEach(unit => {
-                unitPrices[unit] = basePrice;
-              });
-            } else if (product.unit) {
-              unitPrices[product.unit] = basePrice;
-            }
-          }
-            
-          newEditableData.output.items[index].satuan_main = {
-            ...newEditableData.output.items[index].satuan_main,
-            value: productUnit,
-            is_confident: true,
-            available_units: product.units || [], // Store all available units
-            unit_prices: unitPrices // Store unit-specific prices
-          };
-        }
-        
-        // If harga_dasar_main exists, update it with base_price
-        if ('harga_dasar_main' in newEditableData.output.items[index]) {
-          newEditableData.output.items[index].harga_dasar_main = {
-            ...newEditableData.output.items[index].harga_dasar_main,
-            value: parseFloat(product.base_price) || 0,
-            is_confident: true
-          };
-        }
-        
-        // For backward compatibility - If harga_jual_main exists, also update it
-        if ('harga_jual_main' in newEditableData.output.items[index]) {
-          newEditableData.output.items[index].harga_jual_main = {
-            ...newEditableData.output.items[index].harga_jual_main,
-            value: parseFloat(product.price) || 0,
-            is_confident: true
-          };
-        }
-        
-        setEditableData(newEditableData);
-        if (onDataChange) onDataChange(newEditableData);
-      }
-      
-      onClose();
-    }, [activeCell, editableData, onDataChange, onClose]);
-    
-    // Handle search input changes
-    const handleSearchChange = useCallback((e) => {
-      const term = e.target.value;
-      setSearchTerm(term);
-      
-      if (searchDebounceTimer.current) {
-        clearTimeout(searchDebounceTimer.current);
-      }
-      
-      searchDebounceTimer.current = setTimeout(() => {
-        if (term === lastSearchTerm) return;
-        
-        if (term.trim() === '') {
-          setSearchResults([]);
-          setDisplayedItems(initialItems);
-          setHasMore(initialItems.length > 0);
-          return;
-        }
-        
-        if (term.trim().length < 2) {
-          // Don't search if term is too short
-          return;
-        }
-        
-        if (searchCache[term]) {
-          console.log(`[ProductSearchDropdown] Using cached results for "${term}"`);
-          setSearchResults(searchCache[term]);
-          // When searching, show all results
-          setDisplayedItems(searchCache[term]);
-          setHasMore(false); // No "..." button needed when showing all search results
-          return;
-        }
-        
-        console.log(`[ProductSearchDropdown] Searching for "${term}"`);
-        setLoading(true);
-        
-        const performSearch = async () => {
-          try {
-            // For better UX, we'll always search both code and name
-            let results = [];
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 8000);
-            
-            // Determine what fields to search based on activeCell, but default to search both
-            let searchByCode = true;
-            let searchByName = true;
-            
-            // Only limit to one field if specifically requested
-            if (activeCell) {
-              if (activeCell.type === 'kode_barang_main') {
-                searchByCode = true;
-                searchByName = false;
-              } else if (activeCell.type === 'nama_barang_main') {
-                searchByCode = false;
-                searchByName = true;
-              }
-            }
-            
-            console.log('[ProductSearchDropdown] Search config:', { 
-              term, 
-              searchByCode, 
-              searchByName,
-              activeCell: activeCell?.type
-            });
-            
-            // Search by product code if appropriate
-            if (searchByCode) {
-              try {
-                const codeResponse = await axios.get(`${API_BASE_URL}/api/products/search`, {
-                  params: {
-                    search: term,
-                    field: 'product_code',
-                    limit: 0 // Request all matching items without limit
-                  },
-                  signal: controller.signal
-                });
-                
-                if (codeResponse?.data?.success === true && Array.isArray(codeResponse.data.data)) {
-                  const codeResults = codeResponse.data.data
-                    .map(product => ({
-                      product_code: product.kode_main || product.product_code || '',
-                      product_name: product.nama_main || product.product_name || '',
-                      unit: product.unit || '',
-                      units: product.units || [], // All available units
-                      base_price: product.harga_pokok || product.base_price || 0, // Use harga_pokok instead of harga_jual
-                      price: product.harga_pokok || product.base_price || product.price || 0, // For backward compatibility 
-                      supplier_code: product.supplier_code || ''
-                    }))
-                    .filter(product => product.product_code !== '123' && product.product_name !== 'test');
-                  
-                  console.log(`[ProductSearchDropdown] Found ${codeResults.length} results by code for "${term}"`);
-                  results = [...results, ...codeResults];
-                }
-              } catch (error) {
-                console.error('[ProductSearchDropdown] Error searching by product code:', error);
-              }
-            }
-            
-            // Search by product name if appropriate
-            if (searchByName) {
-              try {
-                const nameResponse = await axios.get(`${API_BASE_URL}/api/products/search`, {
-                  params: {
-                    search: term,
-                    field: 'product_name',
-                    limit: 0 // Request all matching items without limit
-                  },
-                  signal: controller.signal
-                });
-                
-                if (nameResponse?.data?.success === true && Array.isArray(nameResponse.data.data)) {
-                  const nameResults = nameResponse.data.data
-                    .map(product => ({
-                      product_code: product.kode_main || product.product_code || '',
-                      product_name: product.nama_main || product.product_name || '',
-                      unit: product.unit || '',
-                      units: product.units || [], // All available units
-                      base_price: product.harga_pokok || product.base_price || 0, // Use harga_pokok instead of harga_jual
-                      price: product.harga_pokok || product.base_price || product.price || 0, // For backward compatibility 
-                      supplier_code: product.supplier_code || ''
-                    }))
-                    .filter(product => product.product_code !== '123' && product.product_name !== 'test');
-                  
-                  console.log(`[ProductSearchDropdown] Found ${nameResults.length} results by name for "${term}"`);
-                  
-                  // Add results that aren't already in the array (based on product_code)
-                  const existingCodes = new Set(results.map(p => p.product_code));
-                  const uniqueNameResults = nameResults.filter(p => !existingCodes.has(p.product_code));
-                  
-                  results = [...results, ...uniqueNameResults];
-                }
-              } catch (error) {
-                console.error('[ProductSearchDropdown] Error searching by product name:', error);
-              }
-            }
-            
-            clearTimeout(timeoutId);
-            
-            // Only do general search if specific searches yielded no results
-            if (results.length === 0) {
-              try {
-                const generalResponse = await axios.get(`${API_BASE_URL}/api/products/search`, {
-                  params: { 
-                    search: term,
-                    limit: 0 // Request all matching items without limit
-                  },
-                  signal: controller.signal
-                });
-                
-                if (generalResponse?.data?.success === true && Array.isArray(generalResponse.data.data)) {
-                  const generalResults = generalResponse.data.data
-                    .map(product => ({
-                      product_code: product.kode_main || product.product_code || '',
-                      product_name: product.nama_main || product.product_name || '',
-                      unit: product.unit || '',
-                      units: product.units || [], // All available units
-                      base_price: product.harga_pokok || product.base_price || 0, // Use harga_pokok instead of harga_jual
-                      price: product.harga_pokok || product.base_price || product.price || 0, // For backward compatibility
-                      supplier_code: product.supplier_code || ''
-                    }))
-                    .filter(product => product.product_code !== '123' && product.product_name !== 'test');
-                  
-                  console.log(`[ProductSearchDropdown] Found ${generalResults.length} results by general search for "${term}"`);
-                  results = [...generalResults];
-                }
-              } catch (error) {
-                console.error('[ProductSearchDropdown] Error in general search:', error);
-              }
-            }
-            
-            console.log(`[ProductSearchDropdown] Total combined results: ${results.length}`);
-            
-            if (results.length > 0) {
-              setSearchCache(prev => ({
-                ...prev,
-                [term]: results
-              }));
-              
-              setSearchResults(results);
-              setDisplayedItems(results); // Show all search results without pagination
-              setHasMore(false); // No need for "load more" since we're showing all results
-            } else {
-              setSearchResults([]);
-              setDisplayedItems([]);
-              setHasMore(false);
-            }
-          } catch (error) {
-            console.error('[ProductSearchDropdown] Search error:', error);
-            setSearchResults([]);
-            setDisplayedItems([]);
-            setHasMore(false);
-          } finally {
-            setLoading(false);
-            setLastSearchTerm(term);
-          }
-        };
-        
-        performSearch();
-      }, 300);
-    }, [API_BASE_URL, initialItems, lastSearchTerm, searchCache, activeCell]);
-    
-    // Render the dropdown with ReactDOM.createPortal
-    return ReactDOM.createPortal(
-      <>
-        {/* Dark overlay background */}
-        <div 
-          className="fixed inset-0 bg-black bg-opacity-50 z-40"
-          onClick={() => onClose()}
-        ></div>
-        <div 
-          ref={dropdownRef}
-          className="fixed z-50 bg-white shadow-lg rounded border border-gray-200 max-w-md w-full text-black"
-          style={{
-            top: '50%',
-            left: '50%',
-            transform: 'translate(-50%, -50%)',
-            maxHeight: '80vh' // Limit max height to 80% of viewport height
-          }}
-        >
-          <div className="p-2 border-b border-gray-200">
-            <input
-              ref={inputRef}
-              type="text"
-              className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
-              placeholder={`Minimal 2 karakter - Search ${activeCell?.type === 'kode_barang_main' ? 'product codes' : activeCell?.type === 'nama_barang_main' ? 'product names' : 'products'}...`}
-              value={searchTerm}
-              onChange={handleSearchChange}
-            />
-          </div>
-          
-          <div 
-            ref={scrollContainerRef} 
-            className="overflow-y-auto" 
-            style={{ maxHeight: 'calc(80vh - 60px)' }} // Adjust for input field height
-          >
-            {loading && (
-              <div className="p-4 flex justify-center">
-                <svg className="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-              </div>
-            )}
-            
-            {!loading && displayedItems.length === 0 && (
-              <div className="p-4 text-center text-gray-500">
-                {searchTerm.trim().length < 2 ? 
-                  "Minimal 2 karakter untuk pencarian" : 
-                  "No products found"}
-              </div>
-            )}
-            
-            <div className="space-y-1">
-              {displayedItems.map((product, idx) => (
-                <div
-                  key={`${product.product_code}-${idx}`}
-                  className="px-3 py-2 cursor-pointer hover:bg-blue-50 flex justify-between items-center"
-                  onClick={() => handleItemSelect(product)}
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-sm truncate">{product.product_name}</div>
-                    <div className="text-xs text-gray-500 flex justify-between">
-                      <span>Code: {product.product_code}</span>
-                      <span>{product.unit || 'No unit'}</span>
-                    </div>
-                  </div>
-                  <div className="text-sm font-mono text-gray-600 ml-2">
-                    {product.base_price ? formatCurrency(product.base_price) : '-'}
-                  </div>
-                </div>
-              ))}
-              
-              {/* Loading indicator when scrolling for more items */}
-              {isLoadingMore && (
-                <div className="p-2 text-center text-gray-500 flex justify-center">
-                  <svg className="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </>,
-      document.body
-    );
-  });
-  // Handle unit change and update price accordingly
+  // Handle unit change - simplified to let ItemsTable handle the unit-price relationship
   const handleUnitChange = useCallback((rowIndex, newUnit) => {
-    console.log(`Changing unit for row ${rowIndex} to ${newUnit}`);
+    console.log(`OCRResultsTable: Received unit change for row ${rowIndex} to ${newUnit}`);
     const newData = { ...editableData };
     
     if (!newData.output.items || !newData.output.items[rowIndex]) {
       return;
     }
     
-    // Update the unit value
+    // Basic update of the unit value
     if ('satuan_main' in newData.output.items[rowIndex]) {
       newData.output.items[rowIndex].satuan_main.value = newUnit;
-      
-      // Get all available units and unit prices if they exist
-      const availableUnits = newData.output.items[rowIndex].satuan_main.available_units || [];
-      const unitPrices = newData.output.items[rowIndex].satuan_main.unit_prices || {};
-      
-      console.log('Unit prices available:', unitPrices);
-      console.log('Selected unit:', newUnit);
-      
-      // Update the base price according to the selected unit if price data is available
-      if (unitPrices && unitPrices[newUnit] !== undefined && 'harga_dasar_main' in newData.output.items[rowIndex]) {
-        console.log(`Updating harga_dasar_main to ${unitPrices[newUnit]} for unit ${newUnit}`);
-        newData.output.items[rowIndex].harga_dasar_main.value = parseFloat(unitPrices[newUnit]) || 0;
-      }
-      
-      // For backward compatibility - also update harga_jual_main if it exists
-      if (unitPrices && unitPrices[newUnit] !== undefined && 'harga_jual_main' in newData.output.items[rowIndex]) {
-        console.log(`Updating harga_jual_main to ${unitPrices[newUnit]} for unit ${newUnit}`);
-        newData.output.items[rowIndex].harga_jual_main.value = parseFloat(unitPrices[newUnit]) || 0;
-      }
     }
     
     setEditableData(newData);
@@ -2454,70 +1737,46 @@ export default function OCRResultsTable({ data, onDataChange }) {
   }
 
   return (
-    <div className="relative">
-      {/* Add a horizontal scroll wrapper */}
-      <div className="relative overflow-auto" style={{ maxWidth: '100%' }}>
-        <OCRResultsContent 
-          editableData={editableData}
-          columns={columns}
-          columnWidths={columnWidths}
-          handleItemChange={handleItemChange}
-          searchStatus={searchStatus}
-          handleProductCellClick={handleProductCellClick}
-          startResize={startResize}
-          renderDatePicker={renderDatePicker}
-          handleHeaderChange={handleHeaderChange}
-          safeGet={safeGet}
-          getCellBackgroundColor={getCellBackgroundColor}
-          renderBooleanField={renderBooleanField}
-          handleIncludePPNChange={handleIncludePPNChange}
-          formatCurrency={formatCurrency}
-        />
-      </div>
-
-      <style jsx>{`
-        .resizer {
-          position: absolute;
-          right: 0;
-          top: 0;
-          height: 100%;
-          width: 5px;
-          background: rgba(0, 0, 0, 0.1);
-          cursor: col-resize;
-          user-select: none;
-          touch-action: none;
-        }
-        
-        .resizer:hover,
-        .resizing {
-          background: rgba(59, 130, 246, 0.5);
-        }
-        
-        /* Highlight on hover for better UX */
-        tr:hover td {
-          background-color: #f3f4f6 !important;
-        }
-        
-        tr:hover td.confidence-low {
-          background-color: #fee2e2 !important;
-        }
-        
-        tr:hover td.confidence-medium {
-          background-color: #fef3c7 !important;
-        }
-        
-        tr:hover td.confidence-high {
-          background-color: #d1fae5 !important;
-        }
-        
-        tr:hover td[style*="backgroundColor: white"]:not(.sticky) {
-          background-color: #f3f4f6 !important;
-        }
-      `}</style>
-
+    <div className="w-full h-full">
+      {/* Invoice Header */}
+      <InvoiceHeader
+        editableData={editableData}
+        handleHeaderChange={handleHeaderChange}
+        renderBooleanField={renderBooleanField}
+        handleIncludePPNChange={handleIncludePPNChange}
+      />
+      
+      {/* Items Table */}
+      <ItemsTable
+        editableData={editableData}
+        handleItemChange={handleItemChange}
+        searchStatus={searchStatus}
+        handleProductCellClick={handleProductCellClick}
+        handleUnitChange={handleUnitChange}
+        handleBKPChange={handleBKPChange}
+      />
+      
+      {/* Totals Section */}
+      <TotalsSection
+        editableData={editableData}
+      />
+      
+      {/* Debug Section */}
+      <DebugSection
+        editableData={editableData}
+      />
+      
       {/* Product Search Dropdown */}
       {dropdownOpen && activeCell && (
-        <ProductSearchDropdown onClose={() => setDropdownOpen(false)} activeCellRef={activeCellRef} activeCell={activeCell} editableData={editableData} setEditableData={setEditableData} onDataChange={onDataChange} API_BASE_URL={API_BASE_URL} />
+        <ProductSearchDropdown 
+          onClose={() => setDropdownOpen(false)} 
+          activeCellRef={activeCellRef} 
+          activeCell={activeCell} 
+          editableData={editableData} 
+          setEditableData={setEditableData} 
+          onDataChange={onDataChange} 
+          API_BASE_URL={API_BASE_URL} 
+        />
       )}
     </div>
   );
