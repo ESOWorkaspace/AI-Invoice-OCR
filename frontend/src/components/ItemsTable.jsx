@@ -23,25 +23,23 @@ const ItemsTable = ({
   // Setup column definitions
   const columns = useMemo(() => [
     { id: 'index', header: '#', width: 40, sticky: true, left: 0 },
-    { id: 'kode_barang_invoice', header: 'Kode Invoice', width: 140 },
+    { id: 'kode_barang_invoice', header: 'Kode Invoice', width: 110 },
     { id: 'nama_barang_invoice', header: 'Nama Invoice', width: 200 },
     { id: 'qty', header: 'Qty', width: 70, type: 'number', align: 'right' },
     { id: 'satuan', header: 'Satuan', width: 90 },
     { id: 'harga_satuan', header: 'Harga Satuan', width: 120, type: 'currency', align: 'right' },
     { id: 'harga_bruto', header: 'Harga Bruto', width: 120, type: 'currency', align: 'right' },
-    { id: 'diskon_persen', header: 'Disc %', width: 80, type: 'percentage', align: 'right' },
-    { id: 'diskon_rp', header: 'Disc Rp', width: 100, type: 'currency', align: 'right' },
-    { id: 'jumlah_netto', header: 'Jumlah Netto', width: 130, type: 'currency', align: 'right' },
+    { id: 'diskon_persen', header: 'Disc %', width: 70, type: 'percentage', align: 'right' },
+    { id: 'diskon_rp', header: 'Disc Rp', width: 90, type: 'currency', align: 'right' },
+    { id: 'jumlah_netto', header: 'Jumlah Netto', width: 115, type: 'currency', align: 'right' },
     { id: 'bkp', header: 'BKP', width: 70, type: 'boolean' },
     { id: 'ppn', header: 'PPN', width: 100, type: 'currency', align: 'right' },
     { id: 'kode_barang_main', header: 'Kode Main', width: 140, type: 'text', special: 'database' },
     { id: 'nama_barang_main', header: 'Nama Main', width: 200, type: 'text', special: 'database' },
     { id: 'satuan_main', header: 'Satuan Main', width: 120, type: 'text', special: 'database' },
     { id: 'harga_dasar_main', header: 'Harga Dasar', width: 130, type: 'currency', align: 'right', special: 'database' },
-    { id: 'kenaikan_persen', header: 'Kenaikan %', width: 110, type: 'percentage', align: 'right' },
-    { id: 'kenaikan_rp', header: 'Kenaikan Rp', width: 110, type: 'currency', align: 'right' },
-    { id: 'margin_persen', header: 'Margin %', width: 110, type: 'percentage', align: 'right', special: 'database' },
-    { id: 'margin_rp', header: 'Margin Rp', width: 110, type: 'currency', align: 'right', special: 'database' },
+    { id: 'perbedaan_persen', header: 'Perbedaan %', width: 130, type: 'difference_percent', align: 'right' },
+    { id: 'perbedaan_rp', header: 'Perbedaan Rp', width: 130, type: 'difference_amount', align: 'right' },
     { id: 'saran_margin_persen', header: 'Saran Margin %', width: 140, type: 'percentage', align: 'right', special: 'suggestion' },
     { id: 'saran_margin_rp', header: 'Saran Margin Rp', width: 145, type: 'currency', align: 'right', special: 'suggestion' }
   ], []);
@@ -107,32 +105,128 @@ const ItemsTable = ({
   const handleUnitChangeInternal = (rowIndex, newUnit) => {
     console.log(`ItemsTable: Changing unit for row ${rowIndex} to ${newUnit}`);
     
-    // First handle the unit-price relationship locally
-    const item = safeGet(editableData, `output.items[${rowIndex}]`);
-    if (item && 'satuan_main' in item) {
-      // Get all available units and unit prices if they exist
+    // Make sure editableData and required structure exists
+    if (!editableData || !editableData.output || !Array.isArray(editableData.output.items)) {
+      console.error(`ItemsTable: Invalid data structure - editableData.output.items is not available`);
+      console.debug('ItemsTable: editableData structure:', editableData);
+      
+      // Still call parent handler to maintain expected behavior
+      if (handleUnitChange) {
+        handleUnitChange(rowIndex, newUnit);
+      }
+      return;
+    }
+    
+    // Check if rowIndex is valid
+    if (rowIndex < 0 || rowIndex >= editableData.output.items.length) {
+      console.error(`ItemsTable: Row index ${rowIndex} is out of bounds (items length: ${editableData.output.items.length})`);
+      
+      // Still call parent handler to maintain expected behavior
+      if (handleUnitChange) {
+        handleUnitChange(rowIndex, newUnit);
+      }
+      return;
+    }
+    
+    // Get item data for the row
+    const item = editableData.output.items[rowIndex];
+    if (!item) {
+      console.error(`ItemsTable: Item not found at row ${rowIndex} even though index is within bounds`);
+      
+      // Still call parent handler to maintain expected behavior
+      if (handleUnitChange) {
+        handleUnitChange(rowIndex, newUnit);
+      }
+      return;
+    }
+    
+    // Log detailed debug info for troubleshooting
+    console.log(`ItemsTable: Processing unit change for row ${rowIndex}:`, {
+      newUnit,
+      item: JSON.stringify(item, null, 2)
+    });
+    
+    if ('satuan_main' in item) {
+      // Get available units and unit prices
       const availableUnits = item.satuan_main.available_units || [];
       const unitPrices = item.satuan_main.unit_prices || {};
       
-      console.log('ItemsTable: Available units:', availableUnits);
-      console.log('ItemsTable: Unit prices available:', unitPrices);
-      console.log('ItemsTable: Selected unit:', newUnit);
+      console.log(`ItemsTable: Available units (${availableUnits.length}):`, availableUnits);
+      console.log(`ItemsTable: Unit prices available:`, unitPrices);
+      console.log(`ItemsTable: Units with prices (${Object.keys(unitPrices).length}):`, Object.keys(unitPrices));
       
-      // Update the base price according to the selected unit if price data is available
-      if (unitPrices && newUnit in unitPrices && 'harga_dasar_main' in item) {
-        const newBasePrice = parseFloat(unitPrices[newUnit]) || 0;
-        console.log(`ItemsTable: Updating harga_dasar_main to ${newBasePrice} for unit ${newUnit}`);
-        
-        // We'll apply this update through the handleItemChange function
-        handleItemChange(rowIndex, 'harga_dasar_main', newBasePrice);
-      } else {
-        console.log(`ItemsTable: No price found for unit ${newUnit}`, unitPrices);
+      // Dump each unit price for clarity
+      for (const unit in unitPrices) {
+        console.log(`ItemsTable: Unit [${unit}] price: ${unitPrices[unit]}`);
       }
-    }
-    
-    // Then call the parent handler to update the unit value itself
-    if (handleUnitChange) {
-      handleUnitChange(rowIndex, newUnit);
+      
+      // Update unit value first through parent handler
+      if (handleUnitChange) {
+        console.log(`ItemsTable: Calling parent handleUnitChange with unit [${newUnit}]`);
+        handleUnitChange(rowIndex, newUnit);
+      }
+      
+      // Process unit price changes after a short delay to ensure unit update is processed
+      setTimeout(() => {
+        // Check if we have unit-specific prices
+        if (unitPrices && typeof unitPrices === 'object' && Object.keys(unitPrices).length > 0) {
+          console.log(`ItemsTable: Processing price for unit [${newUnit}]`);
+          
+          let newBasePrice = null;
+          
+          // Check if the selected unit has a specific price
+          if (newUnit in unitPrices) {
+            newBasePrice = parseFloat(unitPrices[newUnit]) || 0;
+            console.log(`ItemsTable: Found specific price ${newBasePrice} for unit [${newUnit}]`);
+          } else {
+            console.log(`ItemsTable: No specific price found for unit [${newUnit}]`);
+            
+            // Fallback to default or first available price
+            if ('default' in unitPrices) {
+              newBasePrice = parseFloat(unitPrices.default) || 0;
+              console.log(`ItemsTable: Using default price ${newBasePrice}`);
+            } else if (Object.keys(unitPrices).length > 0) {
+              const firstUnit = Object.keys(unitPrices)[0];
+              newBasePrice = parseFloat(unitPrices[firstUnit]) || 0;
+              console.log(`ItemsTable: Using fallback price ${newBasePrice} from unit [${firstUnit}]`);
+            }
+          }
+          
+          // Update the base price if we have a valid price
+          if (newBasePrice !== null && 'harga_dasar_main' in item) {
+            const currentPrice = parseFloat(safeGet(item, 'harga_dasar_main.value', 0));
+            console.log(`ItemsTable: Updating harga_dasar_main from ${currentPrice} to ${newBasePrice}`);
+            
+            // Update the base price value
+            handleItemChange(rowIndex, 'harga_dasar_main', newBasePrice);
+            
+            // Also update margins if needed
+            if ('margin_persen' in item && 'harga_jual_main' in item) {
+              const hargaJual = parseFloat(safeGet(item, 'harga_jual_main.value', 0));
+              if (hargaJual > 0 && newBasePrice > 0) {
+                const marginPersen = ((hargaJual - newBasePrice) / newBasePrice) * 100;
+                const marginRp = hargaJual - newBasePrice;
+                
+                handleItemChange(rowIndex, 'margin_persen', marginPersen);
+                handleItemChange(rowIndex, 'margin_rp', marginRp);
+                
+                console.log(`ItemsTable: Updated margins - ${marginPersen.toFixed(2)}% (${marginRp.toFixed(2)} Rp)`);
+              }
+            }
+          } else {
+            console.warn(`ItemsTable: Could not update price - newBasePrice=${newBasePrice}, has_harga_dasar_main=${('harga_dasar_main' in item)}`);
+          }
+        } else {
+          console.log(`ItemsTable: No unit prices available for price updating`);
+        }
+      }, 100); // Increased delay to ensure unit change is fully processed
+    } else {
+      console.warn(`ItemsTable: satuan_main field not found in item at row ${rowIndex}`);
+      
+      // Still call parent handler to update the unit value
+      if (handleUnitChange) {
+        handleUnitChange(rowIndex, newUnit);
+      }
     }
   };
   
@@ -258,7 +352,7 @@ const ItemsTable = ({
                         </div>
                         {column.id !== 'index' && (
                           <div 
-                            className={`resizer`}
+                            className="resizer"
                             onMouseDown={(e) => startResize(e, column.id)}
                           />
                         )}
@@ -293,4 +387,4 @@ const ItemsTable = ({
   );
 };
 
-export default ItemsTable; 
+export default ItemsTable;

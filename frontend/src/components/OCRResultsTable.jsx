@@ -44,7 +44,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
   
   // Track processed invoice codes to avoid redundant searches
   const processedInvoiceCodes = useRef(new Set()).current;
-  
+
   // Normalize data structure if needed
   useEffect(() => {
     if (data) {
@@ -249,8 +249,8 @@ export default function OCRResultsTable({ data, onDataChange }) {
           newData.output.items[itemIndex].harga_dasar_main = {
             ...newData.output.items[itemIndex].harga_dasar_main,
             value: parseFloat(product.price),
-            is_confident: true
-          };
+          is_confident: true
+        };
         }
         
         setEditableData(newData);
@@ -311,14 +311,14 @@ export default function OCRResultsTable({ data, onDataChange }) {
             newData.output.items[itemIndex].kode_barang_main = {
               ...newData.output.items[itemIndex].kode_barang_main,
               value: product.product_code || '',
-              is_confident: true
-            };
+                  is_confident: true
+                };
             
             newData.output.items[itemIndex].nama_barang_main = {
               ...newData.output.items[itemIndex].nama_barang_main,
               value: product.product_name || '',
-              is_confident: true
-            };
+                  is_confident: true
+                };
             
             // If available, update other fields
             if (product.unit) {
@@ -333,8 +333,8 @@ export default function OCRResultsTable({ data, onDataChange }) {
               newData.output.items[itemIndex].harga_dasar_main = {
                 ...newData.output.items[itemIndex].harga_dasar_main,
                 value: parseFloat(product.price),
-                is_confident: true
-              };
+                    is_confident: true 
+                  };
             }
             
             setEditableData(newData);
@@ -403,9 +403,9 @@ export default function OCRResultsTable({ data, onDataChange }) {
     if (newData.output.items && newData.output.items[rowIndex]) {
       newData.output.items[rowIndex][field] = {
         ...newData.output.items[rowIndex][field],
-        value: value,
-        is_confident: true
-      };
+                  value: value,
+                  is_confident: true
+                };
       
       // Special case for kode_barang_invoice
       // If this field changes and there's a valid value, try to search for the product
@@ -448,7 +448,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
             ...prev,
             [rowIndex]: 'found'
           }));
-        } else {
+              } else {
           // Need to search for product
           setPendingSearches(prev => ({
             ...prev,
@@ -559,7 +559,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
                     };
                   }
                   
-                  setEditableData(newData);
+      setEditableData(newData);
                   if (onDataChange) onDataChange(newData);
                 }
                 
@@ -599,7 +599,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
             });
           });
         }
-      } catch (error) {
+    } catch (error) {
         console.error('Error in auto-search effect:', error);
         // Clean up all pending searches on error
         itemsToSearch.forEach(({ index }) => {
@@ -1375,7 +1375,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
     if (!item) return null;
 
     const cellClass = getCellBackgroundColor(item);
-    
+
     // Special handling for product search cells
     if (columnId === 'kode_barang_main' || columnId === 'nama_barang_main') {
       // Determine if this cell needs manual search
@@ -1644,24 +1644,136 @@ export default function OCRResultsTable({ data, onDataChange }) {
     }
   }, []);
 
-  // Handle unit change - simplified to let ItemsTable handle the unit-price relationship
+  // Handle unit change and update related prices
   const handleUnitChange = useCallback((rowIndex, newUnit) => {
     console.log(`OCRResultsTable: Received unit change for row ${rowIndex} to ${newUnit}`);
-    const newData = { ...editableData };
     
-    if (!newData.output.items || !newData.output.items[rowIndex]) {
+    // Create a deep copy to avoid mutation issues
+    const newData = JSON.parse(JSON.stringify(editableData));
+    
+    // Validate data structure
+    if (!newData?.output?.items || !Array.isArray(newData.output.items)) {
+      console.error(`OCRResultsTable: Invalid data structure for unit change`);
+      console.log('Data structure:', newData);
       return;
     }
     
-    // Basic update of the unit value
-    if ('satuan_main' in newData.output.items[rowIndex]) {
-      newData.output.items[rowIndex].satuan_main.value = newUnit;
+    // Validate row index
+    if (rowIndex < 0 || rowIndex >= newData.output.items.length) {
+      console.error(`OCRResultsTable: Row index ${rowIndex} is out of bounds (items length: ${newData.output.items.length})`);
+      return;
     }
     
-    setEditableData(newData);
+    const item = newData.output.items[rowIndex];
+    if (!item) {
+      console.error(`OCRResultsTable: Item not found at row ${rowIndex} even though index is within bounds`);
+      return;
+    }
     
-    if (onDataChange) {
-      onDataChange(newData);
+    // Log detailed debug info
+    console.log(`OCRResultsTable: Processing unit change for row ${rowIndex}:`, {
+      newUnit,
+      item: JSON.stringify(item, null, 2)
+    });
+    
+    if ('satuan_main' in item) {
+      // Store the previous unit
+      const prevUnit = item.satuan_main.value;
+      
+      // Get unit prices if they exist
+      const unitPrices = item.satuan_main.unit_prices || {};
+      const availableUnits = item.satuan_main.available_units || [];
+      
+      console.log(`OCRResultsTable: Available units (${availableUnits.length}):`, availableUnits);
+      console.log(`OCRResultsTable: Unit prices available:`, unitPrices);
+      
+      // Log each unit price for clarity
+      for (const unit in unitPrices) {
+        console.log(`OCRResultsTable: Unit [${unit}] price: ${unitPrices[unit]}`);
+      }
+      
+      // Only update if the unit is actually changing
+      if (prevUnit !== newUnit) {
+        console.log(`OCRResultsTable: Changing unit from [${prevUnit}] to [${newUnit}]`);
+        
+        // Update the unit value
+        item.satuan_main = {
+          ...item.satuan_main,
+          value: newUnit,
+          is_confident: true
+        };
+        
+        // Check if we need to update the base price based on the selected unit
+        if ('harga_dasar_main' in item && unitPrices && Object.keys(unitPrices).length > 0) {
+          // Get the price for this unit
+          if (newUnit in unitPrices) {
+            const newBasePrice = parseFloat(unitPrices[newUnit]) || 0;
+            const oldBasePrice = parseFloat(item.harga_dasar_main.value) || 0;
+            
+            console.log(`OCRResultsTable: Found specific price ${newBasePrice} for unit [${newUnit}]`);
+            console.log(`OCRResultsTable: Updating base price from ${oldBasePrice} to ${newBasePrice}`);
+            
+            // Update the base price
+            item.harga_dasar_main = {
+              ...item.harga_dasar_main,
+              value: newBasePrice,
+              is_confident: true
+            };
+            
+            // Update margins if needed
+            if ('margin_persen' in item && 'harga_jual_main' in item) {
+              const hargaJual = parseFloat(item.harga_jual_main.value) || 0;
+              if (hargaJual > 0 && newBasePrice > 0) {
+                const marginPersen = ((hargaJual - newBasePrice) / newBasePrice) * 100;
+                const marginRp = hargaJual - newBasePrice;
+                
+                // Update margin values
+                item.margin_persen = {
+                  ...item.margin_persen,
+                  value: marginPersen,
+                  is_confident: true
+                };
+                
+                item.margin_rp = {
+                  ...item.margin_rp,
+                  value: marginRp,
+                  is_confident: true
+                };
+                
+                console.log(`OCRResultsTable: Updated margins - ${marginPersen.toFixed(2)}% (${marginRp.toFixed(2)} Rp)`);
+              }
+            }
+          } else {
+            console.log(`OCRResultsTable: No price found for unit [${newUnit}] in unitPrices`);
+            
+            // Use fallback price if available
+            if (Object.keys(unitPrices).length > 0) {
+              const firstUnit = Object.keys(unitPrices)[0];
+              const fallbackPrice = parseFloat(unitPrices[firstUnit]) || 0;
+              console.log(`OCRResultsTable: Using fallback price ${fallbackPrice} from unit [${firstUnit}]`);
+              
+              // Update with fallback price
+              item.harga_dasar_main = {
+                ...item.harga_dasar_main,
+                value: fallbackPrice,
+                is_confident: true
+              };
+            }
+          }
+        }
+        
+        // Update the data
+        setEditableData(newData);
+        
+        // Notify parent component
+        if (onDataChange) {
+          onDataChange(newData);
+        }
+      } else {
+        console.log(`OCRResultsTable: Unit not changed (same as previous: ${prevUnit})`);
+      }
+    } else {
+      console.warn(`OCRResultsTable: satuan_main field not found in item at row ${rowIndex}`);
     }
   }, [editableData, onDataChange]);
 
@@ -1698,7 +1810,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
   }, [dropdownOpen]);
   
   // When dropdown closes, restore scroll position
-  useEffect(() => {
+    useEffect(() => {
     if (dropdownOpen) return;
     
     // Restore scroll position on a slight delay to ensure DOM is updated
@@ -1745,7 +1857,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
         renderBooleanField={renderBooleanField}
         handleIncludePPNChange={handleIncludePPNChange}
       />
-      
+
       {/* Items Table */}
       <ItemsTable
         editableData={editableData}
@@ -1768,7 +1880,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
       
       {/* Product Search Dropdown */}
       {dropdownOpen && activeCell && (
-        <ProductSearchDropdown 
+        <ProductSearchDropdown
           onClose={() => setDropdownOpen(false)} 
           activeCellRef={activeCellRef} 
           activeCell={activeCell} 

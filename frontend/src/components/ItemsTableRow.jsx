@@ -116,7 +116,8 @@ const ItemsTableRow = memo(({
               renderDatePicker,
               renderBooleanField,
               handleBKPChange,
-              searchStatus
+              searchStatus,
+              item
             )}
           </td>
         );
@@ -138,7 +139,8 @@ const renderEditableCell = (
   renderDatePicker,
   renderBooleanField,
   handleBKPChange,
-  searchStatus
+  searchStatus,
+  parentItem
 ) => {
   if (!item) return null;
   
@@ -180,7 +182,44 @@ const renderEditableCell = (
       <select 
         className={`w-full py-1 px-2 border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 ${cellClass}`}
         value={item.value || ''}
-        onChange={(e) => handleUnitChange(rowIndex, e.target.value)}
+        onChange={(e) => {
+          const currentUnit = item.value;
+          const selectedUnit = e.target.value;
+          
+          console.log(`ItemsTableRow: Unit change | Row: ${rowIndex} | From: [${currentUnit}] | To: [${selectedUnit}]`);
+          
+          // Log all available data for debugging
+          console.log(`ItemsTableRow: Available units (${item.available_units.length}):`, item.available_units);
+          
+          // Log unit prices in detail if they exist
+          if (item.unit_prices) {
+            console.log(`ItemsTableRow: Unit prices available:`, item.unit_prices);
+            
+            // Log each unit price for easier debugging
+            console.log('ItemsTableRow: Unit price details:');
+            for (const unit in item.unit_prices) {
+              console.log(`  • Unit [${unit}] price: ${item.unit_prices[unit]}`);
+            }
+            
+            // Compare current and new prices
+            const currentPrice = currentUnit ? item.unit_prices[currentUnit] : null;
+            const newPrice = item.unit_prices[selectedUnit];
+            
+            console.log(`ItemsTableRow: Price change | From: ${currentPrice} (${currentUnit}) | To: ${newPrice} (${selectedUnit})`);
+          } else {
+            console.log(`ItemsTableRow: No unit prices available in the data`);
+          }
+          
+          // First update the local UI directly to provide immediate feedback
+          // This ensures the dropdown shows the selected value right away
+          // even if the backend update takes time
+          onChange(selectedUnit);
+          
+          // Also call the unit change handler with rowIndex and selected unit
+          // This updates the data structure and triggers price updates
+          console.log(`ItemsTableRow: Calling handleUnitChange(${rowIndex}, "${selectedUnit}")`);
+          handleUnitChange(rowIndex, selectedUnit);
+        }}
       >
         {item.available_units.map((unit, idx) => (
           <option key={`unit-${idx}`} value={unit}>
@@ -191,14 +230,17 @@ const renderEditableCell = (
     );
   }
   
+  // Add parent (row) reference to allow accessing other cells in the same row
+  const itemWithParent = { ...item, parent: parentItem };
+  
   // Handle different field types based on the type parameter
   switch (type) {
     case 'date':
-      return renderDatePicker(item, (date) => onChange(date));
+      return renderDatePicker(itemWithParent, (date) => onChange(date));
     
     case 'boolean':
       return renderBooleanField(
-        item,
+        itemWithParent,
         (value) => {
           if (columnId === 'bkp') {
             handleBKPChange(rowIndex, value);
@@ -212,7 +254,7 @@ const renderEditableCell = (
       return (
         <input
           type="text"
-          value={item.value !== null && item.value !== undefined ? formatCurrency(item.value) : ''}
+          value={itemWithParent.value !== null && itemWithParent.value !== undefined ? formatCurrency(itemWithParent.value) : ''}
           onChange={(e) => {
             const val = parseNumber(e.target.value);
             onChange(val);
@@ -225,7 +267,7 @@ const renderEditableCell = (
       return (
         <input
           type="text"
-          value={typeof item.value === 'number' ? item.value.toString().replace('.', ',') : (item.value || '')}
+          value={typeof itemWithParent.value === 'number' ? itemWithParent.value.toString().replace('.', ',') : (itemWithParent.value || '')}
           onChange={(e) => {
             // Allow only numbers and one comma as decimal separator
             let val = e.target.value.replace(/[^0-9,]/g, '');
@@ -242,11 +284,88 @@ const renderEditableCell = (
         />
       );
       
+    case 'difference_percent':
+      // The parentItem contains the whole row data
+      console.log('Row data for difference calculation:', parentItem);
+      
+      // Extract the harga_dasar_main and harga_satuan values directly from the row data
+      const hargaDasarObj = parentItem.harga_dasar_main || {};
+      const hargaSatuanObj = parentItem.harga_satuan || {};
+      
+      // Safely get the values, defaulting to 0 if they don't exist
+      const hargaDasar = parseFloat(hargaDasarObj.value || 0);
+      const hargaSatuan = parseFloat(hargaSatuanObj.value || 0);
+      
+      console.log(`Difference calculation - Row: ${rowIndex}, Column: ${columnId}`);
+      console.log(`  - hargaDasar: ${hargaDasar}`);
+      console.log(`  - hargaSatuan: ${hargaSatuan}`);
+      
+      // Calculate percentage difference
+      let percentDiff = 0;
+      if (hargaDasar > 0) {
+        percentDiff = ((hargaSatuan - hargaDasar) / hargaDasar) * 100;
+      }
+      
+      // Format and determine styling
+      const isNegative = percentDiff < 0;
+      const absPercentDiff = Math.abs(percentDiff).toFixed(2);
+      const displayValue = `${absPercentDiff}%`;
+      
+      // Red for price increase (negative difference), green for price decrease (positive difference)
+      const textColor = isNegative ? 'text-green-800' : 'text-red-600 ';
+      const arrowIcon = isNegative 
+        ? '↓' // down down for price increase
+        : '↑'; // up up for price decrease
+      
+      return (
+        <div className={`w-full flex items-center justify-end space-x-1 ${textColor}`}>
+          <span className="font-bold">{arrowIcon}</span>
+          <span>{displayValue}</span>
+        </div>
+      );
+      
+    case 'difference_amount':
+      // Use the same approach as difference_percent
+      console.log('Row data for amount difference calculation:', parentItem);
+      
+      // Extract prices directly from the parent row data
+      const baseObj = parentItem.harga_dasar_main || {};
+      const invoiceObj = parentItem.harga_satuan || {};
+      
+      // Safely get the values, defaulting to 0 if they don't exist
+      const basePriceDiff = parseFloat(baseObj.value || 0);
+      const invoicePriceDiff = parseFloat(invoiceObj.value || 0);
+      
+      console.log(`Amount difference calculation - Row: ${rowIndex}, Column: ${columnId}`);
+      console.log(`  - basePriceDiff: ${basePriceDiff}`);
+      console.log(`  - invoicePriceDiff: ${invoicePriceDiff}`);
+      
+      // Calculate absolute difference
+      const amountDiff = invoicePriceDiff - basePriceDiff;
+      
+      // Format and determine styling
+      const isAmountNegative = amountDiff < 0;
+      const absAmountDiff = Math.abs(amountDiff);
+      const displayAmountValue = formatCurrency(absAmountDiff);
+      
+      // Red for price increase (negative difference), green for price decrease (positive difference)
+      const amountTextColor = isAmountNegative ? 'text-green-800' : 'text-red-600 ';
+      const amountArrowIcon = isAmountNegative 
+        ? '↓' // down arrow for price increase
+        : '↑'; // up arrow for price decrease
+      
+      return (
+        <div className={`w-full flex items-center justify-end space-x-1 ${amountTextColor}`}>
+          <span className="font-bold">{amountArrowIcon}</span>
+          <span>{displayAmountValue}</span>
+        </div>
+      );
+      
     case 'number':
       return (
         <input
           type="text"
-          value={item.value !== null && item.value !== undefined ? item.value : ''}
+          value={itemWithParent.value !== null && itemWithParent.value !== undefined ? itemWithParent.value : ''}
           onChange={(e) => {
             // Allow only numbers, commas, and dots
             const re = /^[0-9,.]*$/;
@@ -262,7 +381,7 @@ const renderEditableCell = (
       return (
         <input
           type="text"
-          value={item.value !== undefined && item.value !== null ? item.value : ''}
+          value={itemWithParent.value !== undefined && itemWithParent.value !== null ? itemWithParent.value : ''}
           onChange={(e) => onChange(e.target.value)}
           className={`w-full bg-transparent border-none p-0 focus:ring-0 focus:outline-none ${cellClass}`}
         />

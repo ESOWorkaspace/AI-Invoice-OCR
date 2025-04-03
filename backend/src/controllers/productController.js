@@ -416,11 +416,60 @@ exports.searchProducts = async (req, res) => {
       };
     });
     
+    // Get unit-specific prices
+    let unitPrices = {};
+    if (productIds.length > 0) {
+      try {
+        // Get all unit prices for these products
+        const unitPriceData = await sequelize.query(
+          `SELECT ps.id_produk, ps.nama_satuan, ph.harga_pokok, ph.harga_jual
+           FROM produk_satuan ps
+           LEFT JOIN produk_harga ph ON ps.id_satuan = ph.id_satuan
+           WHERE ps.id_produk IN (:productIds)`,
+          {
+            replacements: { productIds },
+            type: sequelize.QueryTypes.SELECT
+          }
+        );
+        
+        console.log(`[${requestId}] Found unit price data: ${unitPriceData.length} rows`);
+        
+        // Organize unit prices by product and unit
+        unitPriceData.forEach(unitPrice => {
+          const prodId = unitPrice.id_produk;
+          const unitName = unitPrice.nama_satuan;
+          
+          if (!unitPrices[prodId]) {
+            unitPrices[prodId] = {};
+          }
+          
+          unitPrices[prodId][unitName] = {
+            harga_pokok: unitPrice.harga_pokok || 0,
+            harga_jual: unitPrice.harga_jual || 0
+          };
+        });
+      } catch (error) {
+        console.error(`[${requestId}] Error fetching unit price data:`, error);
+      }
+    }
+    
     // Transform the data to match the expected format with units and prices
     const formattedProducts = products.map(product => {
       const productId = product.ID_Produk;
       const units = unitMap[productId] || [];
       const prices = priceMap[productId] || {};
+      
+      // Get unit-specific prices for this product
+      const unitPricesForProduct = unitPrices[productId] || {};
+      
+      // Create unit_prices object mapping each unit to its base price
+      const unitPricesMap = {};
+      units.forEach(unit => {
+        // Use unit-specific price if available, otherwise use default
+        unitPricesMap[unit] = (unitPricesForProduct[unit]?.harga_pokok) || prices.harga_pokok || 0;
+      });
+      
+      console.log(`[${requestId}] Product ${product.Kode_Item} unit prices:`, unitPricesMap);
       
       return {
         kode_main: product.Kode_Item,
@@ -429,7 +478,8 @@ exports.searchProducts = async (req, res) => {
         units: units,
         unit: units.length > 0 ? units[0] : '',
         harga_pokok: prices.harga_pokok || 0,
-        harga_jual: prices.harga_jual || 0
+        harga_jual: prices.harga_jual || 0,
+        unit_prices: unitPricesMap // Add unit-specific prices
       };
     });
     
@@ -577,11 +627,12 @@ exports.searchByInvoiceCode = async (req, res) => {
     let unit = '';
     let base_price = 0;
     let price = 0;
+    let unit_prices = {}; // Object to store unit-specific prices
     
     try {
       // Get all units for this product
       const unitInfo = await sequelize.query(
-        `SELECT nama_satuan FROM produk_satuan WHERE id_produk = :id_produk`,
+        `SELECT id_satuan, nama_satuan FROM produk_satuan WHERE id_produk = :id_produk`,
         { 
           replacements: { id_produk: product.ID_Produk },
           type: sequelize.QueryTypes.SELECT
@@ -591,6 +642,28 @@ exports.searchByInvoiceCode = async (req, res) => {
       if (unitInfo.length > 0) {
         units = unitInfo.map(u => u.nama_satuan);
         unit = units[0]; // Default to the first unit
+        
+        // Get unit-specific prices
+        const unitIds = unitInfo.map(u => u.id_satuan);
+        const unitPriceInfo = await sequelize.query(
+          `SELECT ps.nama_satuan, ph.harga_pokok, ph.harga_jual 
+           FROM produk_satuan ps
+           LEFT JOIN produk_harga ph ON ps.id_satuan = ph.id_satuan
+           WHERE ps.id_produk = :id_produk`,
+          { 
+            replacements: { id_produk: product.ID_Produk },
+            type: sequelize.QueryTypes.SELECT
+          }
+        );
+        
+        console.log(`[${requestId}] Found ${unitPriceInfo.length} unit-specific prices`);
+        
+        // Create unit_prices mapping
+        unitPriceInfo.forEach(up => {
+          unit_prices[up.nama_satuan] = up.harga_pokok || 0;
+        });
+        
+        console.log(`[${requestId}] Unit prices:`, unit_prices);
       }
       
       const priceInfo = await sequelize.query(
@@ -604,6 +677,14 @@ exports.searchByInvoiceCode = async (req, res) => {
       if (priceInfo.length > 0) {
         base_price = priceInfo[0].harga_pokok || 0;
         price = priceInfo[0].harga_jual || 0;
+      }
+      
+      // If we don't have unit-specific prices yet but have units and a base price,
+      // create default mapping using the base price
+      if (Object.keys(unit_prices).length === 0 && units.length > 0) {
+        units.forEach(u => {
+          unit_prices[u] = base_price;
+        });
       }
     } catch (error) {
       console.error(`[${requestId}] Error fetching product details:`, error);
@@ -622,6 +703,7 @@ exports.searchByInvoiceCode = async (req, res) => {
       harga_pokok: base_price,
       price: price,
       harga_jual: price,
+      unit_prices: unit_prices, // Add unit-specific prices
       category: product.Jenis
     };
     
