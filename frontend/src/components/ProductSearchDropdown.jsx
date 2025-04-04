@@ -75,11 +75,11 @@ const ProductSearchDropdown = memo(({
                 base_price: product.harga_pokok || product.base_price || 0, // Use harga_pokok instead of price
                 price: product.harga_pokok || product.base_price || 0, // Use harga_pokok for display too
                 supplier_code: product.supplier_code || '',
-                unit_prices: product.unit_prices || {} // Include unit_prices from backend
+                unit_prices: product.unit_prices || {}, // Include unit_prices from backend
+                supplier_unit: product.satuan_supplier || product.supplier_unit || '', // Include supplier unit info
+                supplier_units: product.supplier_units || {} // Include mapping of units to supplier units if available
               }))
               .filter(product => product.product_code !== '123' && product.product_name !== 'test');
-            
-            console.log(`[ProductSearchDropdown] Found ${items.length} initial items matching invoice code: "${invoiceCode}"`);
             
             setInitialItems(items);
             setDisplayedItems(items); // Initialize with all items since we don't have a display limit
@@ -96,7 +96,7 @@ const ProductSearchDropdown = memo(({
           setHasMore(false);
         }
       } catch (error) {
-        console.error('[ProductSearchDropdown] Error loading initial items:', error);
+        // Error loading initial items
         setInitialItems([]);
         setDisplayedItems([]);
         setHasMore(false);
@@ -161,12 +161,6 @@ const ProductSearchDropdown = memo(({
     if (index >= 0 && editableData?.output?.items) {
       const newEditableData = { ...editableData };
       
-      console.log('ProductSearchDropdown: Selected product:', product);
-      // Log detailed information about unit prices for debugging
-      if (product.unit_prices) {
-        console.log('ProductSearchDropdown: Backend provided these unit prices:', product.unit_prices);
-      }
-      
       // Update kode_barang_main if it exists
       if ('kode_barang_main' in newEditableData.output.items[index]) {
         newEditableData.output.items[index].kode_barang_main = {
@@ -196,15 +190,12 @@ const ProductSearchDropdown = memo(({
         if (product.units_price) {
           // Alternative property name that might be used
           unitPrices = product.units_price;
-          console.log(`ProductSearchDropdown: Using provided units_price:`, unitPrices);
         } else if (product.unit_prices) {
           // Direct unit_prices mapping from backend (most explicit)
           unitPrices = product.unit_prices;
-          console.log(`ProductSearchDropdown: Using unit_prices directly from API:`, unitPrices);
         } else {
           // Fallback for backward compatibility - create a mapping with the same price for all units
           const basePrice = parseFloat(product.base_price) || 0;
-          console.log(`ProductSearchDropdown: No unit-specific prices found in API response, creating fallback mapping with base price ${basePrice}`);
           
           if (product.units && product.units.length > 0) {
             product.units.forEach(unit => {
@@ -213,8 +204,19 @@ const ProductSearchDropdown = memo(({
           } else if (product.unit) {
             unitPrices[product.unit] = basePrice;
           }
-          
-          console.log(`ProductSearchDropdown: Created fallback unit_prices:`, unitPrices);
+        }
+        
+        // Store supplier unit information if available
+        let supplierUnit = '';
+        if (product.supplier_unit && typeof product.supplier_unit === 'object') {
+          // Handle case where supplier_unit is a mapping of internal unit to supplier unit
+          supplierUnit = product.supplier_unit[productUnit] || '';
+        } else if (typeof product.supplier_unit === 'string') {
+          // Handle case where supplier_unit is a direct string
+          supplierUnit = product.supplier_unit;
+        } else if (product.satuan_supplier) {
+          // Alternative property name
+          supplierUnit = product.satuan_supplier;
         }
           
         newEditableData.output.items[index].satuan_main = {
@@ -222,8 +224,18 @@ const ProductSearchDropdown = memo(({
           value: productUnit,
           is_confident: true,
           available_units: product.units || [product.unit].filter(Boolean), // Store all available units
-          unit_prices: unitPrices // Store unit-specific prices
+          unit_prices: unitPrices, // Store unit-specific prices
+          supplier_unit: supplierUnit // Store supplier unit information
         };
+        
+        // Also update the satuan field with supplier unit if it exists
+        if (supplierUnit && 'satuan' in newEditableData.output.items[index]) {
+          newEditableData.output.items[index].satuan = {
+            ...newEditableData.output.items[index].satuan,
+            value: supplierUnit,
+            is_confident: true
+          };
+        }
       }
       
       // If harga_dasar_main exists, update it with base_price
@@ -236,8 +248,6 @@ const ProductSearchDropdown = memo(({
         const basePrice = selectedUnit && unitPrices[selectedUnit] ? 
           parseFloat(unitPrices[selectedUnit]) : 
           parseFloat(product.base_price) || 0;
-        
-        console.log(`ProductSearchDropdown: Setting harga_dasar_main to ${basePrice} for unit ${selectedUnit}`);
         
         newEditableData.output.items[index].harga_dasar_main = {
           ...newEditableData.output.items[index].harga_dasar_main,
@@ -278,7 +288,6 @@ const ProductSearchDropdown = memo(({
       }
       
       if (searchCache[term]) {
-        console.log(`[ProductSearchDropdown] Using cached results for "${term}"`);
         setSearchResults(searchCache[term]);
         // When searching, show all results
         setDisplayedItems(searchCache[term]);
@@ -286,7 +295,6 @@ const ProductSearchDropdown = memo(({
         return;
       }
       
-      console.log(`[ProductSearchDropdown] Searching for "${term}"`);
       setLoading(true);
       
       const performSearch = async () => {
@@ -311,13 +319,6 @@ const ProductSearchDropdown = memo(({
             }
           }
           
-          console.log('[ProductSearchDropdown] Search config:', { 
-            term, 
-            searchByCode, 
-            searchByName,
-            activeCell: activeCell?.type
-          });
-          
           // Search by product code if appropriate
           if (searchByCode) {
             try {
@@ -340,15 +341,16 @@ const ProductSearchDropdown = memo(({
                     base_price: product.harga_pokok || product.base_price || 0, // Use harga_pokok instead of harga_jual
                     price: product.harga_pokok || product.base_price || product.price || 0, // For backward compatibility 
                     supplier_code: product.supplier_code || '',
-                    unit_prices: product.unit_prices || {} // Include unit_prices from backend
+                    unit_prices: product.unit_prices || {}, // Include unit_prices from backend
+                    supplier_unit: product.satuan_supplier || product.supplier_unit || '', // Include supplier unit info
+                    supplier_units: product.supplier_units || {} // Include mapping of units to supplier units
                   }))
                   .filter(product => product.product_code !== '123' && product.product_name !== 'test');
                 
-                console.log(`[ProductSearchDropdown] Found ${codeResults.length} results by code for "${term}"`);
                 results = [...results, ...codeResults];
               }
             } catch (error) {
-              console.error('[ProductSearchDropdown] Error searching by product code:', error);
+              // Error occurred during search by product code
             }
           }
           
@@ -374,30 +376,24 @@ const ProductSearchDropdown = memo(({
                     base_price: product.harga_pokok || product.base_price || 0, // Use harga_pokok instead of harga_jual
                     price: product.harga_pokok || product.base_price || product.price || 0, // For backward compatibility 
                     supplier_code: product.supplier_code || '',
-                    unit_prices: product.unit_prices || {} // Include unit_prices from backend
+                    unit_prices: product.unit_prices || {}, // Include unit_prices from backend
+                    supplier_unit: product.satuan_supplier || product.supplier_unit || '', // Include supplier unit info
+                    supplier_units: product.supplier_units || {} // Include mapping of units to supplier units
                   }))
                   .filter(product => product.product_code !== '123' && product.product_name !== 'test');
                 
-                console.log(`[ProductSearchDropdown] Found ${nameResults.length} results by name for "${term}"`);
-                
-                // Add results that aren't already in the array (based on product_code)
-                const existingCodes = new Set(results.map(p => p.product_code));
-                const uniqueNameResults = nameResults.filter(p => !existingCodes.has(p.product_code));
-                
-                results = [...results, ...uniqueNameResults];
+                results = [...results, ...nameResults];
               }
             } catch (error) {
-              console.error('[ProductSearchDropdown] Error searching by product name:', error);
+              // Error occurred during search by product name
             }
           }
           
-          clearTimeout(timeoutId);
-          
-          // Only do general search if specific searches yielded no results
+          // If there was no specific field search or the results are empty, do a general search
           if (results.length === 0) {
             try {
               const generalResponse = await axios.get(`${API_BASE_URL}/api/products/search`, {
-                params: { 
+                params: {
                   search: term,
                   limit: 0 // Request all matching items without limit
                 },
@@ -411,138 +407,139 @@ const ProductSearchDropdown = memo(({
                     product_name: product.nama_main || product.product_name || '',
                     unit: product.unit || '',
                     units: product.units || [], // All available units
-                    base_price: product.harga_pokok || product.base_price || 0, // Use harga_pokok instead of harga_jual
-                    price: product.harga_pokok || product.base_price || product.price || 0, // For backward compatibility
+                    base_price: product.harga_pokok || product.base_price || 0,
+                    price: product.harga_pokok || product.base_price || product.price || 0,
                     supplier_code: product.supplier_code || '',
-                    unit_prices: product.unit_prices || {} // Include unit_prices from backend
+                    unit_prices: product.unit_prices || {},
+                    supplier_unit: product.satuan_supplier || product.supplier_unit || '',
+                    supplier_units: product.supplier_units || {}
                   }))
                   .filter(product => product.product_code !== '123' && product.product_name !== 'test');
                 
-                console.log(`[ProductSearchDropdown] Found ${generalResults.length} results by general search for "${term}"`);
                 results = [...generalResults];
               }
             } catch (error) {
-              console.error('[ProductSearchDropdown] Error in general search:', error);
+              // Error in general search
             }
           }
           
-          console.log(`[ProductSearchDropdown] Total combined results: ${results.length}`);
-          
-          if (results.length > 0) {
-            setSearchCache(prev => ({
-              ...prev,
-              [term]: results
-            }));
-            
-            setSearchResults(results);
-            // Only show first 30 results initially, then load more as user scrolls
-            const INITIAL_DISPLAY_COUNT = 30;
-            setDisplayedItems(results.slice(0, INITIAL_DISPLAY_COUNT));
-            setHasMore(results.length > INITIAL_DISPLAY_COUNT);
-          } else {
-            setSearchResults([]);
-            setDisplayedItems([]);
-            setHasMore(false);
+          // Remove duplicates based on product_code
+          const uniqueResults = [];
+          const seenCodes = new Set();
+          for (const product of results) {
+            if (!seenCodes.has(product.product_code)) {
+              seenCodes.add(product.product_code);
+              uniqueResults.push(product);
+            }
           }
-        } catch (error) {
-          console.error('[ProductSearchDropdown] Search error:', error);
-          setSearchResults([]);
-          setDisplayedItems([]);
+          
+          results = uniqueResults;
+          
+          // Cache the results
+          setSearchCache(prev => ({
+            ...prev,
+            [term]: results
+          }));
+          
+          setSearchResults(results);
+          setDisplayedItems(results);
           setHasMore(false);
+          setLastSearchTerm(term);
+          
+          clearTimeout(timeoutId);
+        } catch (error) {
+          // Handle and log search errors
         } finally {
           setLoading(false);
-          setLastSearchTerm(term);
         }
       };
       
       performSearch();
     }, 300);
-  }, [API_BASE_URL, initialItems, lastSearchTerm, searchCache, activeCell]);
+  }, [API_BASE_URL, lastSearchTerm, initialItems, activeCell, searchCache]);
   
-  // Render the dropdown with ReactDOM.createPortal
-  return ReactDOM.createPortal(
-    <>
-      {/* Dark overlay background */}
-      <div 
-        className="fixed inset-0 bg-black bg-opacity-50 z-40"
-        onClick={() => onClose()}
-      ></div>
-      <div 
-        ref={dropdownRef}
-        className="fixed z-50 bg-white shadow-lg rounded border border-gray-200 max-w-md w-full text-black"
-        style={{
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          maxHeight: '80vh' // Limit max height to 80% of viewport height
-        }}
-      >
-        <div className="p-2 border-b border-gray-200">
-          <input
-            ref={inputRef}
-            type="text"
-            className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-black bg-white"
-            placeholder={`Minimal 2 karakter - Search ${activeCell?.type === 'kode_barang_main' ? 'product codes' : activeCell?.type === 'nama_barang_main' ? 'product names' : 'products'}...`}
-            value={searchTerm}
-            onChange={handleSearchChange}
-          />
+  // Render the suggestion item
+  const renderSuggestionItem = useCallback((item) => {
+    return (
+      <div className="search-item" onClick={() => handleItemSelect(item)}>
+        <div className="search-item__code" title={item.product_code}>{item.product_code}</div>
+        <div className="search-item__name" title={item.product_name}>{item.product_name}</div>
+        <div className="search-item__unit" title={item.unit}>{item.unit}</div>
+        <div className="search-item__price" title={formatCurrency(item.base_price)}>
+          {formatCurrency(item.base_price) || '0'}
         </div>
-        
-        <div 
-          ref={scrollContainerRef} 
-          className="overflow-y-auto" 
-          style={{ maxHeight: 'calc(80vh - 60px)' }} // Adjust for input field height
-        >
-          {loading && (
-            <div className="p-4 flex justify-center">
-              <svg className="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-            </div>
-          )}
-          
-          {!loading && displayedItems.length === 0 && (
-            <div className="p-4 text-center text-gray-500">
-              {searchTerm.trim().length < 2 ? 
-                "Minimal 2 karakter untuk pencarian" : 
-                "No products found"}
-            </div>
-          )}
-          
-          <div className="space-y-1">
-            {displayedItems.map((product, idx) => (
-              <div
-                key={`${product.product_code}-${idx}`}
-                className="px-3 py-2 cursor-pointer hover:bg-blue-50 flex justify-between items-center"
-                onClick={() => handleItemSelect(product)}
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium text-sm truncate">{product.product_name}</div>
-                  <div className="text-xs text-gray-500 flex justify-between">
-                    <span>Code: {product.product_code}</span>
-                    <span>{product.unit || 'No unit'}</span>
-                  </div>
-                </div>
-                <div className="text-sm font-mono text-gray-600 ml-2">
-                  {product.base_price ? formatCurrency(product.base_price) : '-'}
-                </div>
-              </div>
-            ))}
-            
-            {/* Loading indicator when scrolling for more items */}
-            {isLoadingMore && (
-              <div className="p-2 text-center text-gray-500 flex justify-center">
-                <svg className="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-              </div>
-            )}
+        {item.supplier_unit && (
+          <div className="search-item__supplier-unit" title={`Supplier: ${item.supplier_unit}`}>
+            ({item.supplier_unit})
           </div>
-        </div>
+        )}
       </div>
-    </>,
+    );
+  }, [handleItemSelect]);
+  
+  // Handle click outside the dropdown to close it
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        onClose();
+      }
+    };
+    
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [onClose]);
+
+  // Position the dropdown relative to the active cell
+  // Use portal to render outside the normal DOM hierarchy
+  const dropdownStyles = {
+    top: activeCellRef ? activeCellRef.offsetTop + activeCellRef.offsetHeight + 'px' : '0px',
+    left: activeCellRef ? activeCellRef.offsetLeft + 'px' : '0px',
+    minWidth: activeCellRef ? activeCellRef.offsetWidth + 'px' : '300px',
+  };
+  
+  // Use a portal for the dropdown to ensure it's rendered at the top level
+  return ReactDOM.createPortal(
+    <div 
+      className="product-search-dropdown" 
+      style={dropdownStyles} 
+      ref={dropdownRef}
+    >
+      <div className="search-header">
+        <input
+          type="text"
+          className="search-input"
+          placeholder="Search products..."
+          value={searchTerm}
+          onChange={handleSearchChange}
+          ref={inputRef}
+        />
+        <button className="close-button" onClick={onClose}>×</button>
+      </div>
+      <div className="search-results" ref={scrollContainerRef}>
+        {loading ? (
+          <div className="loading-indicator">Loading...</div>
+        ) : (
+          <>
+            {displayedItems.length === 0 ? (
+              <div className="no-results">
+                {searchTerm.trim() === '' ? 'Start typing to search' : 'No results found'}
+              </div>
+            ) : (
+              <>
+                {displayedItems.map((item, index) => (
+                  <React.Fragment key={item.product_code || index}>
+                    {renderSuggestionItem(item)}
+                  </React.Fragment>
+                ))}
+                {isLoadingMore && <div className="loading-indicator">Loading more...</div>}
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </div>,
     document.body
   );
 });

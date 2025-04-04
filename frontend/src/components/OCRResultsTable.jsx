@@ -200,22 +200,22 @@ export default function OCRResultsTable({ data, onDataChange }) {
 
   // Memoize the search function to prevent dependency issues
   const searchProductByInvoiceCode = useCallback(function searchProductByInvoiceCode(invoiceCode, itemIndex) {
-    console.log(`searchProductByInvoiceCode called with code: ${invoiceCode}, index: ${itemIndex}`);
+    // Remove console log
     
     if (!invoiceCode) {
-      console.warn('No invoice code provided to searchProductByInvoiceCode');
+      // Remove console warn
       return;
     }
     
     // Ensure itemIndex is valid
     if (itemIndex === undefined || itemIndex === null) {
-      console.warn('Invalid itemIndex provided to searchProductByInvoiceCode');
+      // Remove console warn
       return;
     }
     
     // Check if the product is already in cache
     if (productCache[invoiceCode]) {
-      console.log(`[Cache hit] Using cached data for invoice code: ${invoiceCode}`);
+      // Remove console log
       
       const product = productCache[invoiceCode];
       
@@ -238,19 +238,32 @@ export default function OCRResultsTable({ data, onDataChange }) {
         
         // If available, update other fields
         if (product.unit) {
+          const supplierUnit = product.supplier_unit || '';
+          
           newData.output.items[itemIndex].satuan_main = {
             ...newData.output.items[itemIndex].satuan_main,
             value: product.unit,
-            is_confident: true
+            is_confident: true,
+            supplier_unit: supplierUnit // Store supplier unit in this field
           };
+          
+          // Also update the satuan field with supplier unit if it exists
+          if (supplierUnit && newData.output.items[itemIndex].satuan) {
+            newData.output.items[itemIndex].satuan = {
+              ...newData.output.items[itemIndex].satuan,
+              value: supplierUnit,
+              is_confident: true
+            };
+          }
         }
         
-        if (product.price) {
+        // Use base_price (harga_pokok) instead of price for harga_dasar_main
+        if (product.base_price !== undefined || product.harga_pokok !== undefined) {
           newData.output.items[itemIndex].harga_dasar_main = {
             ...newData.output.items[itemIndex].harga_dasar_main,
-            value: parseFloat(product.price),
-          is_confident: true
-        };
+            value: parseFloat(product.base_price || product.harga_pokok),
+            is_confident: true
+          };
         }
         
         setEditableData(newData);
@@ -322,17 +335,30 @@ export default function OCRResultsTable({ data, onDataChange }) {
             
             // If available, update other fields
             if (product.unit) {
+              const supplierUnit = product.supplier_unit || '';
+              
               newData.output.items[itemIndex].satuan_main = {
                 ...newData.output.items[itemIndex].satuan_main,
                 value: product.unit,
-                is_confident: true
+                is_confident: true,
+                supplier_unit: supplierUnit // Store supplier unit in this field
               };
+              
+              // Also update the satuan field with supplier unit if it exists
+              if (supplierUnit && newData.output.items[itemIndex].satuan) {
+                newData.output.items[itemIndex].satuan = {
+                  ...newData.output.items[itemIndex].satuan,
+                  value: supplierUnit,
+                  is_confident: true
+                };
+              }
             }
             
-            if (product.price) {
+            // Use base_price (harga_pokok) instead of price for harga_dasar_main
+            if (product.base_price !== undefined || product.harga_pokok !== undefined) {
               newData.output.items[itemIndex].harga_dasar_main = {
                 ...newData.output.items[itemIndex].harga_dasar_main,
-                value: parseFloat(product.price),
+                value: parseFloat(product.base_price || product.harga_pokok),
                     is_confident: true 
                   };
             }
@@ -347,7 +373,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
           }));
         } else {
           // No results found
-          console.warn(`No products found for invoice code: ${invoiceCode}`);
+          // Remove console warn
           setSearchStatus(prev => ({
             ...prev,
             [itemIndex]: 'not_found'
@@ -362,7 +388,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
         });
       })
       .catch(error => {
-        console.error(`Error searching for product with invoice code ${invoiceCode}:`, error);
+        // Remove console error
         
         // Set search status to error
         setSearchStatus(prev => ({
@@ -378,7 +404,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
         });
       });
     } catch (error) {
-      console.error('Error in searchProductByInvoiceCode:', error);
+      // Remove console error
       
       // Set search status to error
       setSearchStatus(prev => ({
@@ -428,21 +454,34 @@ export default function OCRResultsTable({ data, onDataChange }) {
           };
           
           if (product.unit) {
+            const supplierUnit = product.supplier_unit || '';
+            
             newData.output.items[rowIndex].satuan_main = {
               ...newData.output.items[rowIndex].satuan_main,
               value: product.unit,
-              is_confident: true
+              is_confident: true,
+              supplier_unit: supplierUnit // Store supplier unit in this field
             };
+            
+            // Also update the satuan field with supplier unit if it exists
+            if (supplierUnit && newData.output.items[rowIndex].satuan) {
+              newData.output.items[rowIndex].satuan = {
+                ...newData.output.items[rowIndex].satuan,
+                value: supplierUnit,
+                is_confident: true
+              };
+            }
           }
           
-          if (product.price) {
+          // Use base_price (harga_pokok) instead of price for harga_dasar_main
+          if (product.base_price !== undefined || product.harga_pokok !== undefined) {
             newData.output.items[rowIndex].harga_dasar_main = {
               ...newData.output.items[rowIndex].harga_dasar_main,
-              value: parseFloat(product.price),
+              value: parseFloat(product.base_price || product.harga_pokok),
               is_confident: true
             };
           }
-          
+        
           // Set search status
           setSearchStatus(prev => ({
             ...prev,
@@ -473,145 +512,81 @@ export default function OCRResultsTable({ data, onDataChange }) {
 
   // Handle effect for auto-searching products based on invoice codes
   useEffect(() => {
-    // Skip if there are no items or if we're already searching for something
-    if (!editableData?.output?.items || Object.keys(pendingSearches).length > 0) {
+    // Skip if there are no items
+    if (!editableData?.output?.items || editableData.output.items.length === 0) {
       return;
     }
     
-    // Check which items need to be searched
-    const itemsToSearch = [];
-    
-    editableData.output.items.forEach((item, index) => {
-      const invoiceCode = safeGet(item, 'kode_barang_invoice.value', '');
-      const mainCode = safeGet(item, 'kode_barang_main.value', '');
+    // Use a small delay to ensure the component is fully mounted
+    const timer = setTimeout(() => {
+      // Check which items need to be searched
+      const itemsToSearch = [];
       
-      // Skip items that don't have an invoice code or already have a main code
-      if (!invoiceCode || mainCode || processedInvoiceCodes.has(invoiceCode)) {
-        return;
-      }
-      
-      // Add to the list of items to search
-      itemsToSearch.push({ index, invoiceCode });
-      processedInvoiceCodes.add(invoiceCode);
-    });
-    
-    // No items to search
-    if (itemsToSearch.length === 0) {
-      return;
-    }
-    
-    // Set status to searching for these items
-    itemsToSearch.forEach(({ index }) => {
-      setSearchStatus(prev => ({
-        ...prev,
-        [index]: 'searching'
-      }));
-      
-      setPendingSearches(prev => ({
-        ...prev,
-        [index]: true
-      }));
-    });
-    
-    // Use setTimeout to ensure searchProductByInvoiceCode is defined
-    setTimeout(() => {
-      try {
-        if (typeof searchProductByInvoiceCode === 'function') {
-          // Search for each item
-          itemsToSearch.forEach(({ index, invoiceCode }) => {
-            try {
-              // Check if already in cache
-              if (productCache[invoiceCode]) {
-                console.log(`Using cache for invoice code ${invoiceCode} in auto-search`);
-                
-                // Use cached product
-                const product = productCache[invoiceCode];
-                
-                // Update item data
-                const newData = { ...editableData };
-                
-                if (newData.output.items && newData.output.items[index]) {
-                  newData.output.items[index].kode_barang_main = {
-                    ...newData.output.items[index].kode_barang_main,
-                    value: product.product_code || '',
-                    is_confident: true
-                  };
-                  
-                  newData.output.items[index].nama_barang_main = {
-                    ...newData.output.items[index].nama_barang_main,
-                    value: product.product_name || '',
-                    is_confident: true
-                  };
-                  
-                  if (product.unit) {
-                    newData.output.items[index].satuan_main = {
-                      ...newData.output.items[index].satuan_main,
-                      value: product.unit,
-                      is_confident: true
-                    };
-                  }
-                  
-                  if (product.price) {
-                    newData.output.items[index].harga_dasar_main = {
-                      ...newData.output.items[index].harga_dasar_main,
-                      value: parseFloat(product.price),
-                      is_confident: true
-                    };
-                  }
-                  
-      setEditableData(newData);
-                  if (onDataChange) onDataChange(newData);
-                }
-                
-                setSearchStatus(prev => ({
-                  ...prev,
-                  [index]: 'found'
-                }));
-                
-                // Remove from pending searches
-                setPendingSearches(prev => {
-                  const newPending = { ...prev };
-                  delete newPending[index];
-                  return newPending;
-                });
-              } else {
-                // Not in cache, perform API search
-                searchProductByInvoiceCode(invoiceCode, index);
-              }
-            } catch (itemError) {
-              console.error(`Error searching for item ${index}:`, itemError);
-              // Clean up this pending search
-              setPendingSearches(prev => {
-                const newPending = { ...prev };
-                delete newPending[index];
-                return newPending;
-              });
-            }
-          });
-        } else {
-          console.warn('searchProductByInvoiceCode not available during automatic search');
-          // Clean up pending searches
-          itemsToSearch.forEach(({ index }) => {
-            setPendingSearches(prev => {
-              const newPending = { ...prev };
-              delete newPending[index];
-              return newPending;
-            });
-          });
+      editableData.output.items.forEach((item, index) => {
+        const invoiceCode = safeGet(item, 'kode_barang_invoice.value', '');
+        const mainCode = safeGet(item, 'kode_barang_main.value', '');
+        const searchStat = searchStatus[index];
+        
+        // Consider an item for search if:
+        // 1. It has an invoice code
+        // 2. It doesn't have a main code OR the main code is empty
+        // 3. It hasn't been processed yet
+        // 4. It's not already being searched or has an error/not_found status
+        if (
+          invoiceCode && 
+          (!mainCode || mainCode === '') && 
+          !processedInvoiceCodes.has(invoiceCode) &&
+          (!searchStat || searchStat === 'not_started') 
+        ) {
+          // Add to the list of items to search
+          itemsToSearch.push({ index, invoiceCode });
+          processedInvoiceCodes.add(invoiceCode);
+          
+          // Set status to searching
+          setSearchStatus(prev => ({
+            ...prev,
+            [index]: 'searching'
+          }));
+          
+          setPendingSearches(prev => ({
+            ...prev,
+            [index]: invoiceCode
+          }));
         }
-    } catch (error) {
-        console.error('Error in auto-search effect:', error);
-        // Clean up all pending searches on error
-        itemsToSearch.forEach(({ index }) => {
-          setPendingSearches(prev => {
-            const newPending = { ...prev };
-            delete newPending[index];
-            return newPending;
-          });
-        });
+      });
+      
+      // Search for each item
+      itemsToSearch.forEach(({ index, invoiceCode }) => {
+        searchProductByInvoiceCode(invoiceCode, index);
+      });
+    }, 500); // Short delay to ensure component is ready
+    
+    return () => clearTimeout(timer);
+  }, [editableData, searchProductByInvoiceCode, searchStatus, processedInvoiceCodes, setPendingSearches, setSearchStatus]);
+
+  // Add a separate useEffect to handle initial data load auto-search
+  useEffect(() => {
+    // Only run on initial data load
+    if (!data || !data.output || !data.output.items || data.output.items.length === 0) {
+      return;
+    }
+    
+    // Reset processed codes and search status for initial load
+    processedInvoiceCodes.clear();
+    setSearchStatus({});
+    setPendingSearches({});
+    
+    // Set all items with invoice codes to 'not_started' to trigger the main search effect
+    const initialSearchStatus = {};
+    data.output.items.forEach((item, index) => {
+      const invoiceCode = safeGet(item, 'kode_barang_invoice.value', '');
+      if (invoiceCode) {
+        initialSearchStatus[index] = 'not_started';
       }
-    }, 0);
-  }, [editableData?.output?.items, pendingSearches, productCache, searchProductByInvoiceCode, processedInvoiceCodes, onDataChange]);
+    });
+    
+    setSearchStatus(initialSearchStatus);
+  }, [data]);
 
   // Handle BKP change and update PPN
   const handleBKPChange = (rowIndex, value) => {
@@ -1684,8 +1659,18 @@ export default function OCRResultsTable({ data, onDataChange }) {
       const unitPrices = item.satuan_main.unit_prices || {};
       const availableUnits = item.satuan_main.available_units || [];
       
+      // Get supplier unit information
+      let supplierUnit = item.satuan_main.supplier_unit || '';
+      
+      // If we have a mapping of supplier units, get the one for the new unit
+      if (item.satuan_main.supplier_units && typeof item.satuan_main.supplier_units === 'object') {
+        supplierUnit = item.satuan_main.supplier_units[newUnit] || '';
+        console.log(`OCRResultsTable: Found supplier unit mapping for ${newUnit}: ${supplierUnit}`);
+      }
+      
       console.log(`OCRResultsTable: Available units (${availableUnits.length}):`, availableUnits);
       console.log(`OCRResultsTable: Unit prices available:`, unitPrices);
+      console.log(`OCRResultsTable: Supplier unit for ${newUnit}: ${supplierUnit}`);
       
       // Log each unit price for clarity
       for (const unit in unitPrices) {
@@ -1696,11 +1681,12 @@ export default function OCRResultsTable({ data, onDataChange }) {
       if (prevUnit !== newUnit) {
         console.log(`OCRResultsTable: Changing unit from [${prevUnit}] to [${newUnit}]`);
         
-        // Update the unit value
+        // Update the unit value, preserving supplier_unit information
         item.satuan_main = {
           ...item.satuan_main,
           value: newUnit,
-          is_confident: true
+          is_confident: true,
+          supplier_unit: supplierUnit // Maintain supplier unit information
         };
         
         // Check if we need to update the base price based on the selected unit

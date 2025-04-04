@@ -39,9 +39,7 @@ const ItemsTable = ({
     { id: 'satuan_main', header: 'Satuan Main', width: 120, type: 'text', special: 'database' },
     { id: 'harga_dasar_main', header: 'Harga Dasar', width: 130, type: 'currency', align: 'right', special: 'database' },
     { id: 'perbedaan_persen', header: 'Perbedaan %', width: 130, type: 'difference_percent', align: 'right' },
-    { id: 'perbedaan_rp', header: 'Perbedaan Rp', width: 130, type: 'difference_amount', align: 'right' },
-    { id: 'saran_margin_persen', header: 'Saran Margin %', width: 140, type: 'percentage', align: 'right', special: 'suggestion' },
-    { id: 'saran_margin_rp', header: 'Saran Margin Rp', width: 145, type: 'currency', align: 'right', special: 'suggestion' }
+    { id: 'perbedaan_rp', header: 'Perbedaan Rp', width: 130, type: 'difference_amount', align: 'right' }
   ], []);
   
   // Initialize column widths on mount

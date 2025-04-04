@@ -1,7 +1,7 @@
 /**
  * Controller for OCR operations
  */
-const { ProcessedInvoice, RawOCRData } = require('../models');
+const { ProcessedInvoice, RawOCRData, ProductItem, ProductUnit, ProductPrice } = require('../models');
 const { sequelize } = require('../config/database');
 const { Op } = require('sequelize');
 const uuid = require('uuid');
@@ -9,6 +9,199 @@ const path = require('path');
 const fs = require('fs');
 const moment = require('moment');
 const queueService = require('../services/queueService');
+
+/**
+ * Update product prices and metadata based on invoice data
+ * @param {Object} editedData - The complete edited data from the request
+ * @param {String} requestId - The request ID for logging
+ */
+async function updateProductData(editedData, requestId) {
+  // Extract supplier information from invoice
+  let supplierName = '';
+  if (editedData.output && editedData.output.nama_supplier && editedData.output.nama_supplier.value) {
+    supplierName = editedData.output.nama_supplier.value;
+  } else if (editedData.supplier_name) {
+    supplierName = editedData.supplier_name;
+  }
+  
+  // Get source items from the edited data structure
+  let sourceItems = [];
+  
+  if (editedData.output && editedData.output.items && Array.isArray(editedData.output.items)) {
+    sourceItems = editedData.output.items;
+  } else if (editedData.items && Array.isArray(editedData.items)) {
+    sourceItems = editedData.items;
+  }
+  
+  if (sourceItems.length === 0) {
+    return;
+  }
+  
+  // Track products that were processed
+  const processedProducts = [];
+  
+  // Process each item in the invoice
+  for (const item of sourceItems) {
+    try {
+      // Extract product code and unit from item
+      let productCode = '';
+      let unitName = '';
+      
+      // Extract product code (kode_barang_main)
+      if (item.kode_barang_main) {
+        productCode = item.kode_barang_main.value !== undefined ? item.kode_barang_main.value : item.kode_barang_main;
+      }
+      
+      // Extract unit name (satuan_main)
+      if (item.satuan_main) {
+        if (typeof item.satuan_main === 'object') {
+          unitName = item.satuan_main.value || '';
+        } else if (typeof item.satuan_main === 'string') {
+          unitName = item.satuan_main;
+        }
+      }
+      
+      // Skip if no product code or unit
+      if (!productCode || !unitName) {
+        continue;
+      }
+      
+      // Skip if this product was already processed
+      const productKey = `${productCode}-${unitName}`;
+      if (processedProducts.includes(productKey)) {
+        continue;
+      }
+      
+      // Keep track of processed products
+      processedProducts.push(productKey);
+      
+      // Find product in database
+      const product = await ProductItem.findOne({
+        where: { Kode_Item: productCode }
+      });
+      
+      if (!product) {
+        continue;
+      }
+      
+      const productId = product.ID_Produk;
+      
+      // Update supplier information if available
+      if (supplierName) {
+        await product.update({
+          Supplier_Name: supplierName
+        });
+      }
+      
+      // If there's a supplier code in the invoice item, update it
+      let supplierCode = '';
+      if (item.supplier_code) {
+        supplierCode = item.supplier_code.value !== undefined ? item.supplier_code.value : item.supplier_code;
+        if (supplierCode) {
+          await product.update({
+            Supplier_Code: supplierCode
+          });
+        }
+      }
+      
+      // If the item has kode_barang_invoice, also store that as a supplier code
+      if (!supplierCode && item.kode_barang_invoice) {
+        supplierCode = item.kode_barang_invoice.value !== undefined ? item.kode_barang_invoice.value : item.kode_barang_invoice;
+        if (supplierCode && supplierCode !== productCode) {
+          await product.update({
+            Supplier_Code: supplierCode
+          });
+        }
+      }
+      
+      // Find product unit
+      const unit = await ProductUnit.findOne({
+        where: {
+          ID_Produk: productId,
+          Nama_Satuan: unitName
+        }
+      });
+      
+      if (!unit) {
+        continue;
+      }
+      
+      // Find product price
+      const price = await ProductPrice.findOne({
+        where: {
+          ID_Produk: productId,
+          ID_Satuan: unit.ID_Satuan
+        }
+      });
+      
+      if (!price) {
+        continue;
+      }
+      
+      // Update supplier unit if available in the data
+      if (item.satuan) {
+        const supplierUnit = item.satuan.value !== undefined ? item.satuan.value : 
+                            (typeof item.satuan === 'string' ? item.satuan : '');
+        
+        if (supplierUnit && supplierUnit !== unit.Satuan_Supplier) {
+          await unit.update({
+            Satuan_Supplier: supplierUnit
+          });
+        }
+      } else if (item.satuan_main && item.satuan_main.supplier_unit) {
+        // Try to get from satuan_main.supplier_unit if available
+        const supplierUnit = item.satuan_main.supplier_unit;
+        if (supplierUnit && supplierUnit !== unit.Satuan_Supplier) {
+          await unit.update({
+            Satuan_Supplier: supplierUnit
+          });
+        }
+      }
+      
+      // Get the new price from invoice
+      let newPrice = 0;
+      
+      // Priority 1: Try to get harga_satuan (from ItemsTable) 
+      if (item.harga_satuan) {
+        newPrice = parseFloat(item.harga_satuan.value !== undefined ? item.harga_satuan.value : item.harga_satuan);
+      }
+      
+      // Priority 2: Fall back to harga_dasar_main if harga_satuan not available
+      if (!newPrice && item.harga_dasar_main) {
+        newPrice = parseFloat(item.harga_dasar_main.value !== undefined ? item.harga_dasar_main.value : item.harga_dasar_main);
+      }
+      
+      if (!newPrice) {
+        continue;
+      }
+      
+      // Save current price to harga_pokok_sebelumnya and update harga_pokok
+      const oldPrice = price.Harga_Pokok;
+      
+      // Only update if the price has actually changed
+      if (newPrice !== oldPrice) {
+        await price.update({
+          Harga_Pokok_Sebelumnya: oldPrice,
+          Harga_Pokok: newPrice
+        });
+      }
+      
+      // Calculate and update threshold margin
+      const hargaJual = parseFloat(price.Harga_Jual || 0);
+      if (oldPrice > 0 && hargaJual > 0) {
+        // Calculate current margin percent from old price and selling price
+        const marginPercent = ((hargaJual - oldPrice) / oldPrice) * 100;
+        
+        // Update threshold margin
+        await unit.update({
+          Threshold_Margin: marginPercent
+        });
+      }
+    } catch (error) {
+      // Silently continue with next item
+    }
+  }
+}
 
 /**
  * Save OCR data to the database
@@ -341,6 +534,9 @@ exports.saveOcrData = async (req, res) => {
         
         invoice_id = new_invoice.id;
       }
+      
+      // Update product data
+      await updateProductData(editedData, requestId);
       
       return { id: invoice_id, invoice_number };
     });
