@@ -92,12 +92,12 @@ export default function ProductsPage() {
                 { ID_Varian: 2, Deskripsi: 'Pedas' }
               ],
               units: [
-                { ID_Satuan: 1, Nama_Satuan: 'pcs', Jumlah_Dalam_Satuan_Dasar: 1 },
-                { ID_Satuan: 2, Nama_Satuan: 'dus', Jumlah_Dalam_Satuan_Dasar: 40 }
+                { ID_Satuan: 1, Nama_Satuan: 'pcs', Jumlah_Dalam_Satuan_Dasar: 1, Satuan_Supplier: 'piece', Threshold_Margin: 20.0 },
+                { ID_Satuan: 2, Nama_Satuan: 'dus', Jumlah_Dalam_Satuan_Dasar: 40, Satuan_Supplier: 'box', Threshold_Margin: 25.0 }
               ],
               prices: [
-                { ID_Satuan: 1, Harga_Pokok: 8000, Harga_Jual: 10000 },
-                { ID_Satuan: 2, Harga_Pokok: 320000, Harga_Jual: 400000 }
+                { ID_Satuan: 1, Harga_Pokok: 8000, Harga_Pokok_Sebelumnya: 7500, Harga_Jual: 10000 },
+                { ID_Satuan: 2, Harga_Pokok: 320000, Harga_Pokok_Sebelumnya: 300000, Harga_Jual: 400000 }
               ],
               stocks: [
                 { ID_Satuan: 1, Jumlah_Stok: 120 },
@@ -111,12 +111,12 @@ export default function ProductsPage() {
               Jenis: 'Beras',
               variants: [],
               units: [
-                { ID_Satuan: 3, Nama_Satuan: 'kg', Jumlah_Dalam_Satuan_Dasar: 1 },
-                { ID_Satuan: 4, Nama_Satuan: 'karung', Jumlah_Dalam_Satuan_Dasar: 25 }
+                { ID_Satuan: 3, Nama_Satuan: 'kg', Jumlah_Dalam_Satuan_Dasar: 1, Satuan_Supplier: 'kilo', Threshold_Margin: 15.0 },
+                { ID_Satuan: 4, Nama_Satuan: 'karung', Jumlah_Dalam_Satuan_Dasar: 25, Satuan_Supplier: 'bag', Threshold_Margin: 22.0 }
               ],
               prices: [
-                { ID_Satuan: 3, Harga_Pokok: 12000, Harga_Jual: 15000 },
-                { ID_Satuan: 4, Harga_Pokok: 300000, Harga_Jual: 375000 }
+                { ID_Satuan: 3, Harga_Pokok: 12000, Harga_Pokok_Sebelumnya: 11500, Harga_Jual: 15000 },
+                { ID_Satuan: 4, Harga_Pokok: 300000, Harga_Pokok_Sebelumnya: 287500, Harga_Jual: 375000 }
               ],
               stocks: [
                 { ID_Satuan: 3, Jumlah_Stok: 75 },
@@ -130,10 +130,10 @@ export default function ProductsPage() {
               Jenis: 'Test',
               variants: [],
               units: [
-                { ID_Satuan: 5, Nama_Satuan: 'pcs', Jumlah_Dalam_Satuan_Dasar: 1 }
+                { ID_Satuan: 5, Nama_Satuan: 'pcs', Jumlah_Dalam_Satuan_Dasar: 1, Satuan_Supplier: 'piece', Threshold_Margin: 33.0 }
               ],
               prices: [
-                { ID_Satuan: 5, Harga_Pokok: 5000, Harga_Jual: 7500 }
+                { ID_Satuan: 5, Harga_Pokok: 5000, Harga_Pokok_Sebelumnya: 4800, Harga_Jual: 7500 }
               ],
               stocks: [
                 { ID_Satuan: 5, Jumlah_Stok: 50 }
@@ -146,10 +146,10 @@ export default function ProductsPage() {
               Jenis: 'Test',
               variants: [],
               units: [
-                { ID_Satuan: 6, Nama_Satuan: 'pcs', Jumlah_Dalam_Satuan_Dasar: 1 }
+                { ID_Satuan: 6, Nama_Satuan: 'pcs', Jumlah_Dalam_Satuan_Dasar: 1, Satuan_Supplier: 'item', Threshold_Margin: 28.0 }
               ],
               prices: [
-                { ID_Satuan: 6, Harga_Pokok: 9000, Harga_Jual: 12000 }
+                { ID_Satuan: 6, Harga_Pokok: 9000, Harga_Pokok_Sebelumnya: 8500, Harga_Jual: 12000 }
               ],
               stocks: [
                 { ID_Satuan: 6, Jumlah_Stok: 25 }
@@ -430,7 +430,7 @@ export default function ProductsPage() {
             <div>
               {price ? (
                 <span className="font-medium">
-                  {new Intl.NumberFormat('id-ID').format(price.Harga_Jual)}
+                  {new Intl.NumberFormat('id-ID').format(price.Harga_Pokok)}
                 </span>
               ) : (
                 <span className="text-gray-400">-</span>
@@ -608,6 +608,7 @@ export default function ProductsPage() {
                     <tr>
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit</th>
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Conversion</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Supplier Unit</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
@@ -626,6 +627,9 @@ export default function ProductsPage() {
                               {unit.Jumlah_Dalam_Satuan_Dasar || 1}x base
                             </span>
                           )}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">
+                          {unit.Satuan_Supplier || '-'}
                         </td>
                       </tr>
                     ))}
@@ -647,15 +651,23 @@ export default function ProductsPage() {
                     <tr>
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit</th>
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cost</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Previous Cost</th>
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sell</th>
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Margin</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Threshold</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {product.prices.map((price, idx) => {
                       const costPrice = parseFloat(price.Harga_Pokok) || 0;
+                      const prevCostPrice = parseFloat(price.Harga_Pokok_Sebelumnya) || 0;
                       const sellPrice = parseFloat(price.Harga_Jual) || 0;
                       const margin = costPrice > 0 ? ((sellPrice - costPrice) / costPrice) * 100 : 0;
+                      
+                      // Find matching unit to get threshold margin
+                      const unitItem = product.units && product.units.find(u => u.ID_Satuan === price.ID_Satuan);
+                      const thresholdMargin = unitItem && unitItem.Threshold_Margin !== undefined ? 
+                        parseFloat(unitItem.Threshold_Margin) : null;
                       
                       return (
                         <tr key={idx}>
@@ -667,12 +679,21 @@ export default function ProductsPage() {
                             {costPrice.toLocaleString('id-ID')}
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">
+                            {prevCostPrice > 0 ? prevCostPrice.toLocaleString('id-ID') : '-'}
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-800">
                             {sellPrice.toLocaleString('id-ID')}
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap text-sm">
                             <span className={margin >= 30 ? 'text-green-600' : margin >= 15 ? 'text-yellow-600' : 'text-red-600'}>
                               {margin.toFixed(1)}%
                             </span>
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap text-sm">
+                            {thresholdMargin !== null ? 
+                              <span className={thresholdMargin >= 30 ? 'text-green-600' : thresholdMargin >= 15 ? 'text-yellow-600' : 'text-red-600'}>
+                                {thresholdMargin.toFixed(1)}%
+                              </span> : '-'}
                           </td>
                         </tr>
                       );
@@ -843,13 +864,13 @@ export default function ProductsPage() {
             { Deskripsi: "Variant 2" }
           ],
           units: [
-            { Nama_Satuan: "pcs", Jumlah_Dalam_Satuan_Dasar: 1 },
-            { Nama_Satuan: "box", Jumlah_Dalam_Satuan_Dasar: 12 }
+            { Nama_Satuan: "pcs", Jumlah_Dalam_Satuan_Dasar: 1, Satuan_Supplier: "piece", Threshold_Margin: 20.0 },
+            { Nama_Satuan: "box", Jumlah_Dalam_Satuan_Dasar: 12, Satuan_Supplier: "carton", Threshold_Margin: 25.0 }
           ],
           prices: [
-            { unitName: "pcs", Minimal_Qty: 1, Maksimal_Qty: 11, Harga_Pokok: 8000, Harga_Jual: 10000 },
-            { unitName: "pcs", Minimal_Qty: 12, Maksimal_Qty: null, Harga_Pokok: 7500, Harga_Jual: 9000 },
-            { unitName: "box", Minimal_Qty: 1, Maksimal_Qty: null, Harga_Pokok: 90000, Harga_Jual: 108000 }
+            { unitName: "pcs", Minimal_Qty: 1, Maksimal_Qty: 11, Harga_Pokok: 8000, Harga_Pokok_Sebelumnya: 7800, Harga_Jual: 10000 },
+            { unitName: "pcs", Minimal_Qty: 12, Maksimal_Qty: null, Harga_Pokok: 7500, Harga_Pokok_Sebelumnya: 7200, Harga_Jual: 9000 },
+            { unitName: "box", Minimal_Qty: 1, Maksimal_Qty: null, Harga_Pokok: 90000, Harga_Pokok_Sebelumnya: 86400, Harga_Jual: 108000 }
           ],
           stocks: [
             { unitName: "pcs", Jumlah_Stok: 120 },
@@ -864,12 +885,12 @@ export default function ProductsPage() {
           },
           variants: [],
           units: [
-            { Nama_Satuan: "kg", Jumlah_Dalam_Satuan_Dasar: 1 },
-            { Nama_Satuan: "sack", Jumlah_Dalam_Satuan_Dasar: 25 }
+            { Nama_Satuan: "kg", Jumlah_Dalam_Satuan_Dasar: 1, Satuan_Supplier: "kilo", Threshold_Margin: 15.0 },
+            { Nama_Satuan: "sack", Jumlah_Dalam_Satuan_Dasar: 25, Satuan_Supplier: "bag", Threshold_Margin: 18.0 }
           ],
           prices: [
-            { unitName: "kg", Minimal_Qty: 1, Maksimal_Qty: 24, Harga_Pokok: 25000, Harga_Jual: 30000 },
-            { unitName: "sack", Minimal_Qty: 1, Maksimal_Qty: null, Harga_Pokok: 290000, Harga_Jual: 350000 }
+            { unitName: "kg", Minimal_Qty: 1, Maksimal_Qty: 24, Harga_Pokok: 25000, Harga_Pokok_Sebelumnya: 24000, Harga_Jual: 30000 },
+            { unitName: "sack", Minimal_Qty: 1, Maksimal_Qty: null, Harga_Pokok: 290000, Harga_Pokok_Sebelumnya: 280000, Harga_Jual: 350000 }
           ],
           stocks: [
             { unitName: "kg", Jumlah_Stok: 75 },
@@ -896,14 +917,14 @@ export default function ProductsPage() {
 
   // Handle downloading sample CSV
   const handleDownloadSampleCsv = () => {
-    // Create CSV header
-    const csvHeader = 'Kode_Item,Nama_Item,Jenis,Supplier_Code,Unit_1,Unit_2,Unit_3,Unit_1_Qty,Unit_2_Qty,Unit_3_Qty,Unit_1_Price,Unit_2_Price,Unit_3_Price,Unit_1_Stock,Unit_2_Stock,Unit_3_Stock\n';
+    // Create CSV header with new fields
+    const csvHeader = 'Kode_Item,Nama_Item,Jenis,Supplier_Code,Unit_1,Unit_2,Unit_3,Unit_1_Supplier,Unit_2_Supplier,Unit_3_Supplier,Unit_1_Qty,Unit_2_Qty,Unit_3_Qty,Unit_1_Price,Unit_2_Price,Unit_3_Price,Unit_1_PrevPrice,Unit_2_PrevPrice,Unit_3_PrevPrice,Unit_1_Threshold,Unit_2_Threshold,Unit_3_Threshold,Unit_1_Stock,Unit_2_Stock,Unit_3_Stock\n';
 
-    // Create sample data rows
+    // Create sample data rows with new fields
     const sampleRows = [
-      '010101001S,"Cimory UHT 125ml Chocolate (40)",Susu,SUP001,pcs,lsn,krt,1,12,40,3000,32500,107000,150,12.5,3.75',
-      '010102002X,"Cimory UHT 125ml Strawberry (40)",Susu,SUP001,pcs,lsn,krt,1,12,40,3000,32500,107000,200,16.67,5',
-      '010103003K,"Cimory UHT 125ml Vanilla (40)",Susu,SUP001,pcs,lsn,krt,1,12,40,3000,32500,107000,148,12.33,3.7'
+      '010101001S,"Cimory UHT 125ml Chocolate (40)",Susu,SUP001,pcs,lsn,krt,piece,dozen,carton,1,12,40,3000,32500,107000,2850,31000,102000,20,22,25,150,12.5,3.75',
+      '010102002X,"Cimory UHT 125ml Strawberry (40)",Susu,SUP001,pcs,lsn,krt,piece,dozen,carton,1,12,40,3000,32500,107000,2900,31500,104000,18,20,23,200,16.67,5',
+      '010103003K,"Cimory UHT 125ml Vanilla (40)",Susu,SUP001,pcs,lsn,krt,piece,dozen,carton,1,12,40,3000,32500,107000,2950,32000,106000,15,18,20,148,12.33,3.7'
     ].join('\n');
 
     // Combine header and rows
@@ -1140,7 +1161,9 @@ export default function ProductsPage() {
                 if (!existingUnit) {
                   groupedProducts[row.Kode_Item].units.push({
                     Nama_Satuan: row.Nama_Satuan,
-                    Jumlah_Dalam_Satuan_Dasar: parseFloat(row.Jumlah_Dalam_Satuan_Dasar || 1)
+                    Jumlah_Dalam_Satuan_Dasar: parseFloat(row.Jumlah_Dalam_Satuan_Dasar || 1),
+                    Satuan_Supplier: row.Satuan_Supplier || '',
+                    Threshold_Margin: parseFloat(row.Threshold_Margin || 0)
                   });
                 }
                 
@@ -1149,6 +1172,7 @@ export default function ProductsPage() {
                   groupedProducts[row.Kode_Item].prices.push({
                     unitName: row.Nama_Satuan,
                     Harga_Pokok: parseFloat(row.Harga_Pokok || row.Harga_Jual * 0.8),
+                    Harga_Pokok_Sebelumnya: parseFloat(row.Harga_Pokok_Sebelumnya || (row.Harga_Pokok ? row.Harga_Pokok * 0.95 : row.Harga_Jual * 0.76)),
                     Harga_Jual: parseFloat(row.Harga_Jual)
                   });
                 }
@@ -1219,7 +1243,35 @@ export default function ProductsPage() {
         reader.onerror = reject;
         reader.readAsText(file);
       });
-      return JSON.parse(jsonData);
+      
+      const data = JSON.parse(jsonData);
+      
+      // Process the data to ensure new fields are handled
+      if (data.products && Array.isArray(data.products)) {
+        data.products.forEach(item => {
+          // Handle units - add Satuan_Supplier and Threshold_Margin if they don't exist
+          if (item.units && Array.isArray(item.units)) {
+            item.units.forEach(unit => {
+              if (unit.Satuan_Supplier === undefined) unit.Satuan_Supplier = '';
+              if (unit.Threshold_Margin === undefined) unit.Threshold_Margin = 0;
+            });
+          }
+          
+          // Handle prices - add Harga_Pokok_Sebelumnya if it doesn't exist
+          if (item.prices && Array.isArray(item.prices)) {
+            item.prices.forEach(price => {
+              if (price.Harga_Pokok_Sebelumnya === undefined) {
+                // Default to 95% of Harga_Pokok or 76% of Harga_Jual if Harga_Pokok is missing
+                price.Harga_Pokok_Sebelumnya = price.Harga_Pokok 
+                  ? price.Harga_Pokok * 0.95 
+                  : (price.Harga_Jual ? price.Harga_Jual * 0.76 : 0);
+              }
+            });
+          }
+        });
+      }
+      
+      return data;
     } catch (error) {
       console.error('Error parsing JSON file:', error);
       throw error;

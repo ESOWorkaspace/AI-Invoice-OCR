@@ -60,14 +60,6 @@ export default function Navbar() {
                     History
                   </div>
                 </Link>
-                <Link to="/batch" className="px-3 py-2 rounded-md text-white/80 text-sm font-medium hover:bg-white/60 transition-colors">
-                  <div className="flex items-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                      <path d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM2 11a2 2 0 012-2h12a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4z" />
-                    </svg>
-                    Batch Process
-                  </div>
-                </Link>
               </div>
             </div>
           </div>
@@ -95,20 +87,11 @@ export default function Navbar() {
                 </button>
                 {isDatabaseOpen && (
                   <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-10 ring-1 ring-black ring-opacity-5">
-                    <Link to="/database/invoices" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                      View Invoices
-                    </Link>
                     <Link to="/database/manage" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                       Manage Database
                     </Link>
-                    <Link to="/database/suppliers" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                      Manage Suppliers
-                    </Link>
                     <Link to="/database/products" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                       Product Catalog
-                    </Link>
-                    <Link to="/database/export" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                      Export Data
                     </Link>
                   </div>
                 )}
@@ -194,30 +177,22 @@ export default function Navbar() {
               History
             </div>
           </Link>
-          <Link to="/batch" className="block px-3 py-2 rounded-md text-base font-medium hover:bg-blue-600">
-            <div className="flex items-center">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                <path d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM2 11a2 2 0 012-2h12a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4z" />
-              </svg>
-              Batch Process
-            </div>
-          </Link>
-          <Link to="/database/invoices" className="block px-3 py-2 rounded-md text-base font-medium hover:bg-blue-600">
-            <div className="flex items-center">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                <path d="M3 12v3c0 1.657 3.134 3 7 3s7-1.343 7-3v-3c0 1.657-3.134 3-7 3s-7-1.343-7-3z" />
-                <path d="M3 7v3c0 1.657 3.134 3 7 3s7-1.343 7-3V7c0 1.657-3.134 3-7 3S3 8.657 3 7z" />
-                <path d="M17 5c0 1.657-3.134 3-7 3S3 6.657 3 5s3.134-3 7-3 7 1.343 7 3z" />
-              </svg>
-              Database - Invoices
-            </div>
-          </Link>
           <Link to="/database/manage" className="block px-3 py-2 rounded-md text-base font-medium hover:bg-blue-600">
             <div className="flex items-center">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M2 5a2 2 0 012-2h12a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V5zm3.293 1.293a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 01-1.414-1.414L7.586 10 5.293 7.707a1 1 0 010-1.414zM11 12a1 1 0 100 2h3a1 1 0 100-2h-3z" clipRule="evenodd" />
               </svg>
               Database - Manage
+            </div>
+          </Link>
+          <Link to="/database/products" className="block px-3 py-2 rounded-md text-base font-medium hover:bg-blue-600">
+            <div className="flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M3 12v3c0 1.657 3.134 3 7 3s7-1.343 7-3v-3c0 1.657-3.134 3-7 3s-7-1.343-7-3z" />
+                <path d="M3 7v3c0 1.657 3.134 3 7 3s7-1.343 7-3V7c0 1.657-3.134 3-7 3S3 8.657 3 7z" />
+                <path d="M17 5c0 1.657-3.134 3-7 3S3 6.657 3 5s3.134-3 7-3 7 1.343 7 3z" />
+              </svg>
+              Product Catalog
             </div>
           </Link>
           <Link to="/settings/profile" className="block px-3 py-2 rounded-md text-base font-medium hover:bg-blue-600">

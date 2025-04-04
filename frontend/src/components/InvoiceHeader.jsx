@@ -117,17 +117,6 @@ const InvoiceHeader = ({
                     </td>
                   </tr>
                 )}
-                {safeGet(editableData, 'output.margin_threshold', { value: '15', is_confident: true, from_database: true }) && (
-                  <tr>
-                    <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-gray-100 border-r border-gray-50">Margin Threshold (%):</td>
-                    <td className={`px-3 py-2 whitespace-nowrap text-sm text-gray-900 border-b border-gray-100 border-r border-gray-50 ${getCellBackgroundColor(safeGet(editableData, 'output.margin_threshold', { value: '15', is_confident: true, from_database: true })) || 'bg-white'}`}>
-                      <EditableCell 
-                        item={safeGet(editableData, 'output.margin_threshold', { value: '15', is_confident: true, from_database: true })} 
-                        onChange={(value) => handleHeaderChange('margin_threshold', value)}
-                      />
-                    </td>
-                  </tr>
-                )}
               </tbody>
             </table>
           </div>

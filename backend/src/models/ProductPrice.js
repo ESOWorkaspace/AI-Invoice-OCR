@@ -47,6 +47,13 @@ const ProductPrice = sequelize.define('ProductPrice', {
     field: 'harga_pokok',
     defaultValue: 0.00
   },
+  Harga_Pokok_Sebelumnya: {
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: true,
+    field: 'harga_pokok_sebelumnya',
+    defaultValue: 0.00,
+    comment: 'Previous base price for comparison'
+  },
   Harga_Jual: {
     type: DataTypes.DECIMAL(10, 2),
     allowNull: false,

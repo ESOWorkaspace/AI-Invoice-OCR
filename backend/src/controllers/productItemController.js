@@ -350,11 +350,14 @@ exports.importProducts = async (req, res) => {
               
               // Create new units
               for (const unit of productData.units) {
-                await ProductUnit.create({
-                  id_produk: productId,
-                  nama_satuan: unit.Nama_Satuan,
-                  jumlah_dalam_satuan_dasar: unit.Jumlah_Dalam_Satuan_Dasar || 1
-                }, { transaction });
+                const unitObj = {
+                  ID_Produk: productId,
+                  Nama_Satuan: unit.Nama_Satuan,
+                  Jumlah_Dalam_Satuan_Dasar: parseFloat(unit.Jumlah_Dalam_Satuan_Dasar || 1),
+                  Satuan_Supplier: unit.Satuan_Supplier || '',
+                  Threshold_Margin: parseFloat(unit.Threshold_Margin || 0)
+                };
+                await ProductUnit.create(unitObj, { transaction });
               }
             }
             
@@ -374,6 +377,7 @@ exports.importProducts = async (req, res) => {
                   minimal_qty: price.Minimal_Qty || 1,
                   maksimal_qty: price.Maksimal_Qty || 999999,
                   harga_pokok: price.Harga_Pokok,
+                  harga_pokok_sebelumnya: price.Harga_Pokok_Sebelumnya || 0,
                   harga_jual: price.Harga_Jual
                 }, { transaction });
               }
@@ -423,11 +427,14 @@ exports.importProducts = async (req, res) => {
             // Handle units if provided
             if (productData.units && Array.isArray(productData.units)) {
               for (const unit of productData.units) {
-                await ProductUnit.create({
-                  id_produk: productId,
-                  nama_satuan: unit.Nama_Satuan,
-                  jumlah_dalam_satuan_dasar: unit.Jumlah_Dalam_Satuan_Dasar || 1
-                }, { transaction });
+                const unitObj = {
+                  ID_Produk: productId,
+                  Nama_Satuan: unit.Nama_Satuan,
+                  Jumlah_Dalam_Satuan_Dasar: parseFloat(unit.Jumlah_Dalam_Satuan_Dasar || 1),
+                  Satuan_Supplier: unit.Satuan_Supplier || '',
+                  Threshold_Margin: parseFloat(unit.Threshold_Margin || 0)
+                };
+                await ProductUnit.create(unitObj, { transaction });
               }
             }
             
@@ -440,6 +447,7 @@ exports.importProducts = async (req, res) => {
                   minimal_qty: price.Minimal_Qty || 1,
                   maksimal_qty: price.Maksimal_Qty || 999999,
                   harga_pokok: price.Harga_Pokok,
+                  harga_pokok_sebelumnya: price.Harga_Pokok_Sebelumnya || 0,
                   harga_jual: price.Harga_Jual
                 }, { transaction });
               }
@@ -1074,7 +1082,9 @@ exports.importProducts = async (req, res) => {
             .map(unit => ({
               ID_Produk: newProduct.ID_Produk,
               Nama_Satuan: unit.Nama_Satuan,
-              Jumlah_Dalam_Satuan_Dasar: parseFloat(unit.Jumlah_Dalam_Satuan_Dasar || 1)
+              Jumlah_Dalam_Satuan_Dasar: parseFloat(unit.Jumlah_Dalam_Satuan_Dasar || 1),
+              Satuan_Supplier: unit.Satuan_Supplier || '',
+              Threshold_Margin: parseFloat(unit.Threshold_Margin || 0)
             }));
           
           if (validUnits.length === 0) {
@@ -1082,7 +1092,9 @@ exports.importProducts = async (req, res) => {
             validUnits.push({
               ID_Produk: newProduct.ID_Produk,
               Nama_Satuan: 'pcs',
-              Jumlah_Dalam_Satuan_Dasar: 1
+              Jumlah_Dalam_Satuan_Dasar: 1,
+              Satuan_Supplier: '',
+              Threshold_Margin: 0
             });
             console.log(`[${requestId}] No valid units, created default 'pcs' unit`);
           }
@@ -1129,6 +1141,7 @@ exports.importProducts = async (req, res) => {
                   Minimal_Qty: parseFloat(price.Minimal_Qty || 1),
                   Maksimal_Qty: price.Maksimal_Qty ? parseFloat(price.Maksimal_Qty) : null,
                   Harga_Pokok: parseFloat(price.Harga_Pokok || 0),
+                  Harga_Pokok_Sebelumnya: parseFloat(price.Harga_Pokok_Sebelumnya || 0),
                   Harga_Jual: parseFloat(price.Harga_Jual || 0)
                 };
               })
@@ -1145,6 +1158,7 @@ exports.importProducts = async (req, res) => {
                 Minimal_Qty: 1,
                 Maksimal_Qty: null,
                 Harga_Pokok: 0,
+                Harga_Pokok_Sebelumnya: 0,
                 Harga_Jual: 0
               }));
               
@@ -1205,7 +1219,9 @@ exports.importProducts = async (req, res) => {
           const defaultUnit = {
             ID_Produk: newProduct.ID_Produk,
             Nama_Satuan: 'pcs',
-            Jumlah_Dalam_Satuan_Dasar: 1
+            Jumlah_Dalam_Satuan_Dasar: 1,
+            Satuan_Supplier: '',
+            Threshold_Margin: 0
           };
           
           const createdUnit = await ProductUnit.create(defaultUnit, { transaction });
@@ -1218,6 +1234,7 @@ exports.importProducts = async (req, res) => {
             Minimal_Qty: 1,
             Maksimal_Qty: null,
             Harga_Pokok: 0,
+            Harga_Pokok_Sebelumnya: 0,
             Harga_Jual: 0
           }, { transaction });
           

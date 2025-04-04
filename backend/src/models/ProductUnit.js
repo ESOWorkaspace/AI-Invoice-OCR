@@ -26,6 +26,19 @@ const ProductUnit = sequelize.define('ProductUnit', {
     allowNull: false,
     field: 'nama_satuan'
   },
+  Satuan_Supplier: {
+    type: DataTypes.STRING(50),
+    allowNull: true,
+    field: 'satuan_supplier',
+    comment: 'Unit name as provided by supplier'
+  },
+  Threshold_Margin: {
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: true,
+    field: 'threshold_margin',
+    defaultValue: 0,
+    comment: 'Margin threshold for this unit'
+  },
   Jumlah_Dalam_Satuan_Dasar: {
     type: DataTypes.DECIMAL(10, 2),
     allowNull: false,
