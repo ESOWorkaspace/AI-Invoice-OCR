@@ -73,7 +73,8 @@ const InvoiceHeader = ({
                     </td>
                   </tr>
                 )}
-                {safeGet(editableData, 'output.tipe_dokumen', { value: '', is_confident: false }) && (
+                {/* Conditionally render document type field */}
+                {safeGet(editableData, 'output.tipe_dokumen', { value: '', is_confident: false }).value && (
                   <tr>
                     <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-gray-100 border-r border-gray-50">Tipe Dokumen:</td>
                     <td className={`px-3 py-2 whitespace-nowrap text-sm text-gray-900 border-b border-gray-100 border-r border-gray-50 ${getCellBackgroundColor(safeGet(editableData, 'output.tipe_dokumen', { value: '', is_confident: false })) || 'bg-white'}`}>
@@ -84,7 +85,8 @@ const InvoiceHeader = ({
                     </td>
                   </tr>
                 )}
-                {safeGet(editableData, 'output.tipe_pembayaran', { value: '', is_confident: false }) && (
+                {/* Conditionally render payment type field */}
+                {safeGet(editableData, 'output.tipe_pembayaran', { value: '', is_confident: false }).value && (
                   <tr>
                     <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-gray-100 border-r border-gray-50">Tipe Pembayaran:</td>
                     <td className={`px-3 py-2 whitespace-nowrap text-sm text-gray-900 border-b border-gray-100 border-r border-gray-50 ${getCellBackgroundColor(safeGet(editableData, 'output.tipe_pembayaran', { value: '', is_confident: false })) || 'bg-white'}`}>

@@ -87,4 +87,55 @@ export const formatDateDisplay = (value) => {
   const year = date.getFullYear();
   
   return `${day}-${month}-${year}`;
+};
+
+/**
+ * Formats a cell value based on its type (column key)
+ * @param {*} value - The raw value
+ * @param {string} key - The column key (e.g., 'harga_satuan', 'qty')
+ * @returns {string} Formatted string
+ */
+export const formatCellValue = (value, key) => {
+  if (value === null || value === undefined || value === '') {
+    return '-';
+  }
+
+  // Determine type based on key (adjust logic as needed)
+  let type = 'string';
+  if (key.includes('harga') || key.includes('rp') || key.includes('jumlah') || key.includes('ppn') || key === 'total') {
+    type = 'currency';
+  } else if (key.includes('persen') || key === 'discount') {
+    type = 'percentage';
+  } else if (key === 'qty' || key === 'quantity' || key === 'kuantitas') { // Added number type detection
+    type = 'number';
+  } else if (key.includes('_date') || key.includes('tanggal')) {
+    type = 'date';
+  }
+
+  try {
+    switch (type) {
+      case 'currency':
+        return formatCurrency(value);
+      case 'percentage':
+        // Format percentage with 2 decimal places and % sign
+        const numPercent = parseFloat(value) || 0;
+        return `${numPercent.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+      case 'number': // Format plain numbers with thousand separators
+        const num = parseNumber(value); // Use parseNumber to handle potential commas/dots
+        if (isNaN(num)) return '-';
+        return num.toLocaleString('id-ID'); // Use locale string for separators
+      case 'date':
+        // Basic date formatting, assuming ISO or parsable string
+        try {
+          return format(new Date(value), 'dd/MM/yyyy');
+        } catch (dateError) {
+          return String(value); // Fallback to string if invalid date
+        }
+      default:
+        return String(value);
+    }
+  } catch (error) {
+    console.error(`Error formatting value (${value}) for key (${key}):`, error);
+    return String(value); // Fallback
+  }
 }; 

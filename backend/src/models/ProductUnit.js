@@ -22,12 +22,12 @@ const ProductUnit = sequelize.define('ProductUnit', {
     }
   },
   Nama_Satuan: {
-    type: DataTypes.STRING(20),
+    type: DataTypes.STRING(100),
     allowNull: false,
     field: 'nama_satuan'
   },
   Satuan_Supplier: {
-    type: DataTypes.STRING(50),
+    type: DataTypes.STRING(100),
     allowNull: true,
     field: 'satuan_supplier',
     comment: 'Unit name as provided by supplier'

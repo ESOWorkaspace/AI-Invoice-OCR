@@ -18,6 +18,9 @@ router.get('/search/:query', invoiceController.searchInvoices);
 // Get invoice by ID
 router.get('/:id', invoiceController.getInvoiceById);
 
+// Get invoice details by ID
+router.get('/:id/details', invoiceController.getInvoiceDetails);
+
 // Create new invoice
 router.post('/', invoiceController.createInvoice);
 

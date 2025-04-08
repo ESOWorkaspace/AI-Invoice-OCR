@@ -1,6 +1,31 @@
 import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 
+// Format currency (Moved outside formatValue for general use)
+const formatCurrencyGlobal = (amount) => {
+  try {
+    return new Intl.NumberFormat('id-ID', {
+      style: 'currency',
+      currency: 'IDR',
+      minimumFractionDigits: 0
+    }).format(amount || 0); 
+  } catch (error) {
+    console.warn('Error formatting currency:', amount, error);
+    return String(amount || 0);
+  }
+};
+
+// Helper function to check if a string is valid JSON (Kept for general use)
+const isJsonString = (str) => {
+  if (typeof str !== 'string') return false;
+  try {
+    const result = JSON.parse(str);
+    return typeof result === 'object' && result !== null;
+  } catch (e) {
+    return false;
+  }
+};
+
 export default function DatabaseTable({ 
   data, 
   schema, 
@@ -96,46 +121,70 @@ export default function DatabaseTable({
     }
   };
   
-  // Format currency
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('id-ID', {
-      style: 'currency',
-      currency: 'IDR',
-      minimumFractionDigits: 0
-    }).format(amount);
+  // Determine cell background color based on value (null/undefined = red)
+  const getCellBackgroundColor = (value) => {
+    if (value === null || value === undefined) {
+      return 'bg-red-100'; // Use a light red for null/undefined
+    }
+    return 'bg-white'; // Default white background
   };
-  
-  // Format value based on type
-  const formatValue = (value, type) => {
+
+  // Format value based on type (Removed row parameter)
+  const formatValue = (value, type, name) => {
     if (value === null || value === undefined) {
       return '-';
     }
     
     switch (type) {
       case 'date':
-        return value ? format(new Date(value), 'dd/MM/yyyy') : '-';
+        try {
+          return format(new Date(value), 'dd/MM/yyyy');
+        } catch (error) {
+          console.warn('Error formatting date:', value, error);
+          return value || '-';
+        }
       case 'datetime':
-        return value ? format(new Date(value), 'dd/MM/yyyy HH:mm') : '-';
+        try {
+          return format(new Date(value), 'dd/MM/yyyy HH:mm:ss');
+        } catch (error) {
+          console.warn('Error formatting datetime:', value, error);
+          return value || '-';
+        }
       case 'boolean':
         return value ? 'Yes' : 'No';
       case 'currency':
-        return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(value);
+        // Use the global helper function
+        return formatCurrencyGlobal(value);
       case 'number':
       case 'integer':
+        try {
         return new Intl.NumberFormat('id-ID').format(value);
+        } catch (error) {
+          console.warn('Error formatting number:', value, error);
+          return value || '-';
+        }
       case 'json':
         try {
+          if (name === 'raw_data') {
+            return "[JSON Data]"; 
+          }
+
           // Parse JSON if it's a string
           const jsonData = typeof value === 'string' ? JSON.parse(value) : value;
           
-          // If it's an array (like items in processed_invoices)
-          if (Array.isArray(jsonData)) {
-            // For items in processed invoices - check for invoice item structure
-            if (jsonData.length > 0 && (
-              jsonData[0].product_name || 
-              jsonData[0].nama_barang_invoice || 
-              jsonData[0].kode_barang_invoice
-            )) {
+          if (jsonData === null || jsonData === undefined) {
+            return '-';
+          }
+
+          // Special handling for 'items' field if it's an array
+          if (name === 'items' && Array.isArray(jsonData)) {
+            // Check if array contains items with expected structure
+             const isInvoiceItems = jsonData.length > 0 && (
+               Object.prototype.hasOwnProperty.call(jsonData[0], 'product_code') ||
+               Object.prototype.hasOwnProperty.call(jsonData[0], 'product_name')
+             );
+
+            if (isInvoiceItems) {
               return (
                 <div className="max-h-60 overflow-y-auto">
                   <table className="min-w-full text-xs border-collapse">
@@ -143,44 +192,35 @@ export default function DatabaseTable({
                       <tr className="bg-gray-100">
                         <th className="px-2 py-1 border">Kode</th>
                         <th className="px-2 py-1 border">Nama Barang</th>
-                        <th className="px-2 py-1 border text-right">
-                          Qty
-                        </th>
+                        <th className="px-2 py-1 border text-right">Qty</th>
                         <th className="px-2 py-1 border">Satuan</th>
-                        <th className="px-2 py-1 border">Harga</th>
-                        <th className="px-2 py-1 border">Total</th>
+                        <th className="px-2 py-1 border text-right">Harga</th>
+                        <th className="px-2 py-1 border text-right">Total</th>
                       </tr>
                     </thead>
                     <tbody>
                       {jsonData.map((item, index) => (
-                        <tr key={index} className="hover:bg-gray-50">
-                          <td className="px-2 py-1 border">{item.kode_barang_invoice || item.product_code || '-'}</td>
-                          <td className="px-2 py-1 border">{item.nama_barang_invoice || item.product_name || '-'}</td>
+                        <tr key={item.id || index} className="hover:bg-gray-50">
+                          <td className="px-2 py-1 border">{item.product_code ?? '-'}</td>
+                          <td className="px-2 py-1 border">{item.product_name ?? '-'}</td>
                           <td className="px-2 py-1 border text-right">
-                            {(() => {
-                              // Try all possible quantity field names
-                              let quantity = null;
-                              
-                              if (typeof item.qty !== 'undefined' && item.qty !== null) {
-                                quantity = item.qty;
-                              } else if (typeof item.quantity !== 'undefined' && item.quantity !== null) {
-                                quantity = item.quantity;
-                              } else if (typeof item.kuantitas !== 'undefined' && item.kuantitas !== null) {
-                                quantity = item.kuantitas;
-                              } else {
-                                quantity = 0;
-                              }
-                              
-                              console.log(`Item ${index} quantity value:`, quantity);
-                              return new Intl.NumberFormat('id-ID').format(quantity);
-                            })()}
+                            {item.quantity !== null && item.quantity !== undefined 
+                              ? new Intl.NumberFormat('id-ID').format(item.quantity)
+                              : '-'
+                            }
                           </td>
-                          <td className="px-2 py-1 border">{item.satuan || item.unit || '-'}</td>
+                          <td className="px-2 py-1 border">{item.unit ?? '-'}</td>
                           <td className="px-2 py-1 border text-right">
-                            {new Intl.NumberFormat('id-ID').format(item.harga_satuan || item.price || 0)}
+                            {item.price !== null && item.price !== undefined
+                              ? formatCurrencyGlobal(item.price)
+                              : '-'
+                            }
                           </td>
                           <td className="px-2 py-1 border text-right">
-                            {new Intl.NumberFormat('id-ID').format(item.jumlah_netto || item.total || 0)}
+                             {item.total !== null && item.total !== undefined
+                               ? formatCurrencyGlobal(item.total)
+                               : '-'
+                             }
                           </td>
                         </tr>
                       ))}
@@ -189,20 +229,21 @@ export default function DatabaseTable({
                 </div>
               );
             }
+            }
             
-            // For other arrays
+          // Fallback for other JSON arrays or objects
+          if (Array.isArray(jsonData)) {
             return (
               <div className="max-h-32 overflow-y-auto">
                 <ul className="list-disc pl-4">
                   {jsonData.map((item, index) => (
-                    <li key={index}>{typeof item === 'object' ? JSON.stringify(item) : item}</li>
+                    <li key={index}>{item === null || item === undefined ? '-' : (typeof item === 'object' ? JSON.stringify(item) : item)}</li>
                   ))}
                 </ul>
               </div>
             );
           }
-          
-          // For objects
+          else if (typeof jsonData === 'object') {
           return (
             <div className="max-h-32 overflow-y-auto">
               <pre className="text-xs whitespace-pre-wrap">
@@ -210,25 +251,16 @@ export default function DatabaseTable({
               </pre>
             </div>
           );
+          }
+          return value ?? '-';
+
         } catch (error) {
-          return <span className="text-red-500">Invalid JSON</span>;
+          console.warn('Error processing JSON value:', value, error);
+          return (typeof value === 'string' ? value : JSON.stringify(value)) ?? '-'; 
         }
       default:
-        return value;
+        return value ?? '-';
     }
-  };
-
-  // Get cell background color based on confidence
-  const getCellBackgroundColor = (value, confidence) => {
-    if (value === null || value === undefined) {
-      return 'bg-red-100'; // Red background for null/undefined values
-    }
-    
-    if (confidence === false) {
-      return 'bg-orange-100'; // Orange background for low confidence
-    }
-    
-    return ''; // Default white background for confident data
   };
 
   // Handle edit start
@@ -311,17 +343,6 @@ export default function DatabaseTable({
       };
     });
   };
-  
-  // Helper function to check if a string is valid JSON
-  const isJsonString = (str) => {
-    if (typeof str !== 'string') return false;
-    try {
-      const result = JSON.parse(str);
-      return typeof result === 'object' && result !== null;
-    } catch (e) {
-      return false;
-    }
-  };
 
   // Handle delete
   const handleDelete = (id) => {
@@ -385,47 +406,284 @@ export default function DatabaseTable({
     setCurrentPage(1);
   };
 
+  // Handle input change within the items table
+  const handleItemInputChange = (index, field, value) => {
+    // console.log(`Item Change: Index ${index}, Field ${field}, Value ${value}`);
+    setEditedData(prev => {
+      let currentItems = [];
+      const itemsSource = prev.items; // Get current items from state
+      try {
+        if (typeof itemsSource === 'string' && itemsSource.trim() !== '') {
+          currentItems = JSON.parse(itemsSource);
+        } else if (Array.isArray(itemsSource)) {
+          currentItems = itemsSource;
+        } else {
+          currentItems = [];
+        }
+        if (!Array.isArray(currentItems)) currentItems = [];
+      } catch (e) {
+        console.error("Error parsing items data during update:", e);
+        currentItems = [];
+      }
+      
+      // Create a deep copy to avoid modifying state directly
+      const updatedItems = JSON.parse(JSON.stringify(currentItems)); 
+
+      // Ensure the target item exists
+      if (updatedItems[index]) {
+        // Update the specific field
+        updatedItems[index][field] = value;
+
+        // Optionally recalculate total if price or quantity changes (simple example)
+        if (field === 'price' || field === 'quantity') {
+           const price = parseFloat(updatedItems[index].price) || 0;
+           const quantity = parseFloat(updatedItems[index].quantity) || 0;
+           // Assuming no discount calculation needed *during* edit for simplicity here
+           updatedItems[index].total = price * quantity; 
+        }
+      }
+      
+      return { ...prev, items: updatedItems }; // Return updated state object
+    });
+  };
+
+  // Handle adding a new item row
+  const handleAddItem = () => {
+    // console.log('Add Item clicked');
+     setEditedData(prev => {
+      let currentItems = [];
+      const itemsSource = prev.items;
+      try {
+        if (typeof itemsSource === 'string' && itemsSource.trim() !== '') {
+          currentItems = JSON.parse(itemsSource);
+        } else if (Array.isArray(itemsSource)) {
+          currentItems = itemsSource;
+        } else {
+          currentItems = [];
+        }
+        if (!Array.isArray(currentItems)) currentItems = [];
+      } catch (e) {
+        console.error("Error parsing items data before adding:", e);
+        currentItems = [];
+      }
+
+      // Define a new empty item structure
+      const newItem = {
+        id: `new_${Date.now()}`,
+        product_code: '',
+        product_name: '',
+        quantity: 0,
+        unit: '',
+        price: 0,
+        total: 0,
+        // Add other fields expected by display/save logic, defaulting to empty/null/zero
+        is_confident: {} // Assuming an empty object is okay if needed
+      };
+
+      // Return updated state with the new item appended
+      return { ...prev, items: [...currentItems, newItem] }; 
+    });
+  };
+
+  // Handle deleting an item row
+  const handleDeleteItem = (index) => {
+    // console.log(`Delete Item clicked: Index ${index}`);
+    setEditedData(prev => {
+      let currentItems = [];
+      const itemsSource = prev.items;
+      try {
+        if (typeof itemsSource === 'string' && itemsSource.trim() !== '') {
+          currentItems = JSON.parse(itemsSource);
+        } else if (Array.isArray(itemsSource)) {
+          currentItems = itemsSource;
+        } else {
+          currentItems = [];
+        }
+        if (!Array.isArray(currentItems)) currentItems = [];
+      } catch (e) {
+        console.error("Error parsing items data before deleting:", e);
+        currentItems = [];
+      }
+      
+      // Create a new array excluding the item at the specified index
+      const updatedItems = currentItems.filter((_, i) => i !== index);
+      
+      // Return updated state
+      return { ...prev, items: updatedItems };
+    });
+  };
+
   // Render cell content
   const renderCellContent = (row, column) => {
     const { name, type, editable } = column;
     const value = row[name];
+    const formattedValue = formatValue(value, type, name); 
     
     if (editingRow === row.id && editable) {
-      switch (type) {
-        case 'string':
+      let editValue = editedData[name] !== undefined ? editedData[name] : value;
+
+      // == Special Handling for 'items' field in Edit Mode ==
+      if (name === 'items') {
+        let currentItems = [];
+        try {
+          if (typeof editValue === 'string' && editValue.trim() !== '') {
+            currentItems = JSON.parse(editValue);
+          } else if (Array.isArray(editValue)) {
+            currentItems = editValue;
+          } else {
+             currentItems = [];
+          }
+          if (!Array.isArray(currentItems)) currentItems = [];
+        } catch (e) {
+          console.error("Error parsing items data for editing:", e);
+          currentItems = [];
+        }
+
+        return (
+          <div className="w-full">
+            <table className="min-w-full text-xs border-collapse border border-gray-300">
+              <thead className="bg-gray-100">
+                <tr>
+                  <th className="px-2 py-1 border border-gray-300">Kode</th>
+                  <th className="px-2 py-1 border border-gray-300">Nama Barang</th>
+                  <th className="px-2 py-1 border border-gray-300 text-right">Qty</th>
+                  <th className="px-2 py-1 border border-gray-300">Satuan</th>
+                  <th className="px-2 py-1 border border-gray-300 text-right">Harga</th>
+                  <th className="px-2 py-1 border border-gray-300">Aksi</th>
+                </tr>
+              </thead>
+              <tbody>
+                {currentItems.map((item, index) => (
+                  <tr key={item.id || index}> 
+                    <td className="border border-gray-300 p-1">
+                      <input 
+                        type="text" 
+                        value={item.product_code || ''}
+                        onChange={(e) => handleItemInputChange(index, 'product_code', e.target.value)}
+                        className="w-full px-1 py-0.5 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                    </td>
+                    <td className="border border-gray-300 p-1">
+                      <input 
+                        type="text" 
+                        value={item.product_name || ''}
+                        onChange={(e) => handleItemInputChange(index, 'product_name', e.target.value)}
+                        className="w-full px-1 py-0.5 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                    </td>
+                    <td className="border border-gray-300 p-1">
+                      <input 
+                        type="number" 
+                        value={item.quantity || 0}
+                        onChange={(e) => handleItemInputChange(index, 'quantity', parseFloat(e.target.value) || 0)}
+                        className="w-16 px-1 py-0.5 text-xs text-right border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                    </td>
+                    <td className="border border-gray-300 p-1">
+                      <input 
+                        type="text" 
+                        value={item.unit || ''}
+                        onChange={(e) => handleItemInputChange(index, 'unit', e.target.value)}
+                        className="w-12 px-1 py-0.5 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                    </td>
+                    <td className="border border-gray-300 p-1">
+                      <input 
+                        type="number" 
+                        value={item.price || 0}
+                        onChange={(e) => handleItemInputChange(index, 'price', parseFloat(e.target.value) || 0)}
+                        className="w-24 px-1 py-0.5 text-xs text-right border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                    </td>
+                     <td className="border border-gray-300 p-1 text-center">
+                       <button 
+                         onClick={() => handleDeleteItem(index)} 
+                         className="text-red-500 hover:text-red-700 text-xs px-1 py-0.5"
+                         title="Hapus Item"
+                       >
+                         X 
+                       </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <button 
+              onClick={handleAddItem}
+              className="mt-2 px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
+            >
+              + Tambah Item
+            </button>
+          </div>
+        );
+      } 
+      // == End Special Handling for 'items' ==
+      // Moved special handling for payment/document type outside switch for clarity
+      else if (name === 'payment_type' || name === 'document_type') {
           return (
             <input
               type="text"
               className="w-full px-2 py-1 border border-gray-300 rounded"
-              value={editedData[name] || ''}
+              value={editValue ?? ''} 
               onChange={(e) => handleFieldChange(name, e.target.value)}
             />
           );
-        case 'integer':
+      }
+      // Default handling using switch for other types
+      else {
+        switch (type) {
+          case 'string':
           return (
             <input
-              type="number"
+                  type="text"
               className="w-full px-2 py-1 border border-gray-300 rounded"
-              value={editedData[name] || 0}
-              onChange={(e) => handleFieldChange(name, parseInt(e.target.value, 10) || 0)}
+                  value={editValue ?? ''} 
+                  onChange={(e) => handleFieldChange(name, e.target.value)}
             />
           );
+          case 'integer':
+          case 'number':
         case 'currency':
           return (
             <input
               type="number"
               className="w-full px-2 py-1 border border-gray-300 rounded"
-              value={editedData[name] || 0}
-              onChange={(e) => handleFieldChange(name, parseInt(e.target.value, 10) || 0)}
+                  value={editValue ?? 0} 
+                  onChange={(e) => handleFieldChange(name, e.target.value === '' ? null : parseFloat(e.target.value) || 0)} 
             />
           );
         case 'date':
+              let dateValue = '';
+             if (editValue) {
+               try {
+                 dateValue = new Date(editValue).toISOString().split('T')[0];
+               } catch (e) {
+                 console.warn("Invalid date for input:", editValue);
+               }
+             }
           return (
             <input
               type="date"
               className="w-full px-2 py-1 border border-gray-300 rounded"
-              value={editedData[name] ? new Date(editedData[name]).toISOString().split('T')[0] : ''}
+                 value={dateValue}
+                 onChange={(e) => handleFieldChange(name, e.target.value ? new Date(e.target.value).toISOString() : null)} 
+               />
+             );
+          case 'json': // Handles other JSON fields (NOT items, NOT payment/doc type)
+              let jsonString = '';
+             if (editValue !== null && editValue !== undefined) {
+                try {
+                  jsonString = typeof editValue === 'object' ? JSON.stringify(editValue, null, 2) : String(editValue);
+                } catch (e) {
+                  jsonString = String(editValue); 
+                }
+             }
+             return (
+               <textarea
+                 className="w-full px-2 py-1 border border-gray-300 rounded h-20" 
+                 value={jsonString}
               onChange={(e) => handleFieldChange(name, e.target.value)}
+                 readOnly={name === 'raw_data'} 
             />
           );
         default:
@@ -433,14 +691,15 @@ export default function DatabaseTable({
             <input
               type="text"
               className="w-full px-2 py-1 border border-gray-300 rounded"
-              value={editedData[name] || ''}
+                  value={editValue ?? ''}
               onChange={(e) => handleFieldChange(name, e.target.value)}
             />
           );
       }
-    } else {
-      return formatValue(value, type);
+      }
     }
+    
+    return formattedValue; 
   };
 
   return (
@@ -580,19 +839,10 @@ export default function DatabaseTable({
                           : 'text-left'
                       } ${
                         editingRow === row.id && field.editable ? '' : 
-                        getCellBackgroundColor(row[field.name], row[`${field.name}_is_confident`])
+                        getCellBackgroundColor(row[field.name])
                       }`}
                     >
-                      {editingRow === row.id && field.editable ? (
-                        <input
-                          type={field.type === 'number' || field.type === 'integer' || field.type === 'currency' ? 'number' : 'text'}
-                          value={editedData[field.name] || ''}
-                          onChange={(e) => handleFieldChange(field.name, e.target.value)}
-                          className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                        />
-                      ) : (
-                        formatValue(row[field.name], field.type)
-                      )}
+                      {renderCellContent(row, field)}
                     </td>
                   ))}
                   <td className="px-3 py-4 whitespace-nowrap text-right text-sm font-medium">

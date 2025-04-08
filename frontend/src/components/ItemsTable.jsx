@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, memo } from 'react';
 import ItemsTableRow from './ItemsTableRow';
 import { DatePickerComponent, BooleanField } from './UIComponents';
 import { safeGet } from '../utils/dataHelpers';
@@ -6,40 +6,49 @@ import { safeGet } from '../utils/dataHelpers';
 /**
  * Component for displaying the items table
  */
-const ItemsTable = ({
+const ItemsTable = memo(({
   editableData,
   handleItemChange,
   searchStatus,
   handleProductCellClick,
   handleUnitChange,
-  handleBKPChange
+  handleBKPChange,
+  onAddItem,
+  onDeleteItem
 }) => {
+  // Get items from editableData
+  const items = safeGet(editableData, 'output.items', []);
+
   // State for column widths
   const [columnWidths, setColumnWidths] = useState({});
   const [resizingColumn, setResizingColumn] = useState(null);
   const [resizeStartX, setResizeStartX] = useState(null);
   const [initialWidth, setInitialWidth] = useState(null);
   
+  // State to track manually changed unit row index
+  const [manuallyChangedUnitIndex, setManuallyChangedUnitIndex] = useState(null);
+  
   // Setup column definitions
   const columns = useMemo(() => [
     { id: 'index', header: '#', width: 40, sticky: true, left: 0 },
-    { id: 'kode_barang_invoice', header: 'Kode Invoice', width: 110 },
-    { id: 'nama_barang_invoice', header: 'Nama Invoice', width: 200 },
-    { id: 'qty', header: 'Qty', width: 70, type: 'number', align: 'right' },
-    { id: 'satuan', header: 'Satuan', width: 90 },
-    { id: 'harga_satuan', header: 'Harga Satuan', width: 120, type: 'currency', align: 'right' },
-    { id: 'harga_bruto', header: 'Harga Bruto', width: 120, type: 'currency', align: 'right' },
-    { id: 'diskon_persen', header: 'Disc %', width: 70, type: 'percentage', align: 'right' },
-    { id: 'diskon_rp', header: 'Disc Rp', width: 90, type: 'currency', align: 'right' },
-    { id: 'jumlah_netto', header: 'Jumlah Netto', width: 115, type: 'currency', align: 'right' },
-    { id: 'bkp', header: 'BKP', width: 70, type: 'boolean' },
-    { id: 'ppn', header: 'PPN', width: 100, type: 'currency', align: 'right' },
-    { id: 'kode_barang_main', header: 'Kode Main', width: 140, type: 'text', special: 'database' },
-    { id: 'nama_barang_main', header: 'Nama Main', width: 200, type: 'text', special: 'database' },
-    { id: 'satuan_main', header: 'Satuan Main', width: 120, type: 'text', special: 'database' },
-    { id: 'harga_dasar_main', header: 'Harga Dasar', width: 130, type: 'currency', align: 'right', special: 'database' },
-    { id: 'perbedaan_persen', header: 'Perbedaan %', width: 130, type: 'difference_percent', align: 'right' },
-    { id: 'perbedaan_rp', header: 'Perbedaan Rp', width: 130, type: 'difference_amount', align: 'right' }
+    { id: 'kode_barang_invoice', header: 'Kode Invoice', width: 110, editable: true },
+    { id: 'nama_barang_invoice', header: 'Nama Invoice', width: 190, editable: true },
+    { id: 'qty', header: 'Qty', width: 60, type: 'number', align: 'right', editable: true },
+    { id: 'satuan', header: 'Satuan', width: 80, editable: true },
+    { id: 'harga_satuan', header: 'Harga Satuan', width: 110, type: 'currency', align: 'right', editable: true },
+    { id: 'harga_bruto', header: 'Harga Bruto', width: 110, type: 'currency', align: 'right' , editable: true },
+    { id: 'diskon_persen', header: 'Disc %', width: 60, type: 'percentage', align: 'right', editable: true },
+    { id: 'diskon_rp', header: 'Disc Rp', width: 95, type: 'currency', align: 'right' , editable: true },
+    { id: 'jumlah_netto', header: 'Jumlah Netto', width: 110, type: 'currency', align: 'right' , editable: true },
+    { id: 'bkp', header: 'BKP', width: 60, type: 'boolean' },
+    { id: 'ppn', header: 'PPN', width: 90, type: 'currency', align: 'right' },
+    { id: 'kode_barang_main', header: 'Kode Main', width: 130, type: 'text', special: 'productSearch' },
+    { id: 'nama_barang_main', header: 'Nama Main', width: 190, type: 'text', special: 'productSearch' },
+    { id: 'satuan_main', header: 'Satuan Main', width: 110, type: 'text', special: 'unitSelect' },
+    { id: 'harga_dasar_main', header: 'Harga Dasar', width: 120, type: 'currency', align: 'right', special: 'database' },
+    { id: 'perbedaan_persen', header: 'Perbedaan % ', width: 120, type: 'difference_percent', align: 'right' },
+    { id: 'perbedaan_rp', header: 'Perbedaan Rp', width: 120, type: 'difference_amount', align: 'right' },
+    { id: 'action', header: 'Aksi', width: 50 }
   ], []);
   
   // Initialize column widths on mount
@@ -50,6 +59,169 @@ const ItemsTable = ({
     });
     setColumnWidths(initialWidths);
   }, [columns]);
+  
+  // Add useEffect to sync satuan_main with satuan_supplier when appropriate
+  useEffect(() => {
+    if (!items || !Array.isArray(items)) return;
+    
+    items.forEach((item, rowIndex) => {
+      // Skip if this row was just manually changed
+      if (rowIndex === manuallyChangedUnitIndex) {
+        console.log(`ItemsTable: Skipping auto-sync for row ${rowIndex} - Manual change detected`);
+        return;
+      }
+      
+      if (!item.satuan || !item.satuan_main) return;
+      
+      const supplierUnit = safeGet(item, 'satuan.value', '');
+      const mainUnit = safeGet(item, 'satuan_main.value', '');
+      const availableUnits = safeGet(item, 'satuan_main.available_units', []);
+      const unitPrices = safeGet(item, 'satuan_main.unit_prices', {});
+      const storedSupplierUnit = safeGet(item, 'satuan_main.supplier_unit', '');
+      const invoicePrice = parseFloat(safeGet(item, 'harga_satuan.value', 0));
+      
+      if (!supplierUnit) return;
+      
+      // Skip if current mainUnit is valid and available
+      if (mainUnit && availableUnits.includes(mainUnit)) {
+          return; // Skip auto-sync for this item, preserving manual selection
+      }
+
+      // Only proceed if we need to update (supplier unit changed OR main unit is invalid/empty)
+      const needsUpdate = supplierUnit !== storedSupplierUnit || !mainUnit || !availableUnits.includes(mainUnit);
+                         
+      if (!needsUpdate) {
+        return;
+      }
+      
+      console.log(`ItemsTable: Syncing units for row ${rowIndex}. Supplier: ${supplierUnit}, Current Main: ${mainUnit}, Invoice Price: ${invoicePrice}`);
+      
+      // Check for supplier_units mapping (product.supplier_units format)
+      const supplierUnits = {};
+      
+      // Convert available supplier units into a map if it's not already
+      if (item.satuan_main.supplier_units && typeof item.satuan_main.supplier_units === 'object') {
+        // Direct map: { mainUnit: supplierUnit }
+        Object.entries(item.satuan_main.supplier_units).forEach(([main, supplier]) => {
+          supplierUnits[main] = String(supplier);
+        });
+      }
+      
+      let newMainUnit = '';
+      let matchReason = '';
+      
+      // PRIORITY 1: Find a main unit that maps to this supplier unit
+      if (Object.keys(supplierUnits).length > 0) {
+        console.log(`ItemsTable: Checking direct mapping for "${supplierUnit}" from:`, supplierUnits);
+        
+        for (const [main, mappedSupplierUnit] of Object.entries(supplierUnits)) {
+          // Normalize both strings: trim whitespace and convert to lowercase
+          const normalizedMapped = String(mappedSupplierUnit).toLowerCase().trim();
+          const normalizedSupplier = String(supplierUnit).toLowerCase().trim();
+          
+          console.log(`  - Comparing "${mappedSupplierUnit}" with "${supplierUnit}"`);
+          console.log(`  - Normalized: "${normalizedMapped}" vs "${normalizedSupplier}"`);
+          
+          // Check for exact match after normalization
+          if (normalizedMapped === normalizedSupplier) {
+            newMainUnit = main;
+            matchReason = 'direct supplier mapping';
+            console.log(`  ✓ MATCH FOUND: ${main}`);
+            break;
+          }
+          
+          // Also check if supplier unit is contained within mapped value (for partial matches)
+          if (normalizedMapped.includes(normalizedSupplier) || normalizedSupplier.includes(normalizedMapped)) {
+            newMainUnit = main;
+            matchReason = 'partial supplier mapping';
+            console.log(`  ✓ PARTIAL MATCH FOUND: ${main}`);
+            // Don't break here - continue looking for exact match first
+          }
+        }
+      }
+      
+      // PRIORITY 2: If we have an invoice price, find the unit with a matching price
+      if (!newMainUnit && invoicePrice > 0 && Object.keys(unitPrices).length > 0) {
+        for (const [unit, price] of Object.entries(unitPrices)) {
+          const unitPrice = parseFloat(price) || 0;
+          // Match within 1% to account for rounding differences
+          if (Math.abs(unitPrice - invoicePrice) / invoicePrice < 0.01) {
+            newMainUnit = unit;
+            matchReason = 'price match';
+            break;
+          }
+        }
+      }
+      
+      // PRIORITY 3: If still no match, check if there's a previously confirmed mapping
+      if (!newMainUnit && item.satuan_main.previous_mapping) {
+        const previousMapping = item.satuan_main.previous_mapping;
+        if (previousMapping[supplierUnit]) {
+          newMainUnit = previousMapping[supplierUnit];
+          matchReason = 'previous mapping';
+        }
+      }
+      
+      // PRIORITY 4: If no match found, use the first available unit that has a price
+      if (!newMainUnit && availableUnits.length > 0 && Object.keys(unitPrices).length > 0) {
+        for (const unit of availableUnits) {
+          if (unit in unitPrices) {
+            newMainUnit = unit;
+            matchReason = 'first available with price';
+            break;
+          }
+        }
+      }
+      
+      // PRIORITY 5: If still no unit found, just use the first available unit
+      if (!newMainUnit && availableUnits.length > 0) {
+        newMainUnit = availableUnits[0];
+        matchReason = 'first available';
+      }
+      
+      console.log(`ItemsTable: Selected main unit "${newMainUnit}" (reason: ${matchReason})`);
+      
+      // If we found a main unit to use and it's different from the current one, update it
+      if (newMainUnit && newMainUnit !== mainUnit) {
+        console.log(`ItemsTable: Updating main unit from "${mainUnit}" to "${newMainUnit}" (reason: ${matchReason})`);
+        
+        // Update satuan_main with the correct main unit and store supplier unit
+        item.satuan_main = {
+          ...item.satuan_main,
+          value: newMainUnit,
+          is_confident: true,
+          supplier_unit: supplierUnit,
+          // Store this mapping for future reference
+          previous_mapping: {
+            ...(item.satuan_main.previous_mapping || {}),
+            [supplierUnit]: newMainUnit
+          }
+        };
+        
+        // Use the parent handler to ensure all dependent calculations are performed
+        if (handleUnitChange) {
+          handleUnitChange(rowIndex, newMainUnit);
+        }
+        
+        // Also update the base price directly if we have unit prices
+        if (unitPrices && newMainUnit in unitPrices) {
+          const newBasePrice = parseFloat(unitPrices[newMainUnit]) || 0;
+          
+          if (item.harga_dasar_main && newBasePrice > 0) {
+            console.log(`ItemsTable: Updating base price from ${safeGet(item, 'harga_dasar_main.value', 0)} to ${newBasePrice}`);
+            
+            // Use handleItemChange to ensure proper state updates
+            handleItemChange(rowIndex, 'harga_dasar_main', newBasePrice);
+          }
+        }
+      }
+    });
+    
+    // Reset manually changed index after processing all items
+    if (manuallyChangedUnitIndex !== null) {
+      setManuallyChangedUnitIndex(null);
+    }
+  }, [items, handleUnitChange, handleItemChange, manuallyChangedUnitIndex]);
   
   // Start resizing
   const startResize = (e, columnId) => {
@@ -96,135 +268,6 @@ const ItemsTable = ({
       document.removeEventListener('mousemove', window.resizeHandlers.move);
       document.removeEventListener('mouseup', window.resizeHandlers.up);
       window.resizeHandlers = null;
-    }
-  };
-  
-  // Manage unit change and update price data accordingly
-  const handleUnitChangeInternal = (rowIndex, newUnit) => {
-    console.log(`ItemsTable: Changing unit for row ${rowIndex} to ${newUnit}`);
-    
-    // Make sure editableData and required structure exists
-    if (!editableData || !editableData.output || !Array.isArray(editableData.output.items)) {
-      console.error(`ItemsTable: Invalid data structure - editableData.output.items is not available`);
-      console.debug('ItemsTable: editableData structure:', editableData);
-      
-      // Still call parent handler to maintain expected behavior
-      if (handleUnitChange) {
-        handleUnitChange(rowIndex, newUnit);
-      }
-      return;
-    }
-    
-    // Check if rowIndex is valid
-    if (rowIndex < 0 || rowIndex >= editableData.output.items.length) {
-      console.error(`ItemsTable: Row index ${rowIndex} is out of bounds (items length: ${editableData.output.items.length})`);
-      
-      // Still call parent handler to maintain expected behavior
-      if (handleUnitChange) {
-        handleUnitChange(rowIndex, newUnit);
-      }
-      return;
-    }
-    
-    // Get item data for the row
-    const item = editableData.output.items[rowIndex];
-    if (!item) {
-      console.error(`ItemsTable: Item not found at row ${rowIndex} even though index is within bounds`);
-      
-      // Still call parent handler to maintain expected behavior
-      if (handleUnitChange) {
-        handleUnitChange(rowIndex, newUnit);
-      }
-      return;
-    }
-    
-    // Log detailed debug info for troubleshooting
-    console.log(`ItemsTable: Processing unit change for row ${rowIndex}:`, {
-      newUnit,
-      item: JSON.stringify(item, null, 2)
-    });
-    
-    if ('satuan_main' in item) {
-      // Get available units and unit prices
-      const availableUnits = item.satuan_main.available_units || [];
-      const unitPrices = item.satuan_main.unit_prices || {};
-      
-      console.log(`ItemsTable: Available units (${availableUnits.length}):`, availableUnits);
-      console.log(`ItemsTable: Unit prices available:`, unitPrices);
-      console.log(`ItemsTable: Units with prices (${Object.keys(unitPrices).length}):`, Object.keys(unitPrices));
-      
-      // Dump each unit price for clarity
-      for (const unit in unitPrices) {
-        console.log(`ItemsTable: Unit [${unit}] price: ${unitPrices[unit]}`);
-      }
-      
-      // Update unit value first through parent handler
-      if (handleUnitChange) {
-        console.log(`ItemsTable: Calling parent handleUnitChange with unit [${newUnit}]`);
-        handleUnitChange(rowIndex, newUnit);
-      }
-      
-      // Process unit price changes after a short delay to ensure unit update is processed
-      setTimeout(() => {
-        // Check if we have unit-specific prices
-        if (unitPrices && typeof unitPrices === 'object' && Object.keys(unitPrices).length > 0) {
-          console.log(`ItemsTable: Processing price for unit [${newUnit}]`);
-          
-          let newBasePrice = null;
-          
-          // Check if the selected unit has a specific price
-          if (newUnit in unitPrices) {
-            newBasePrice = parseFloat(unitPrices[newUnit]) || 0;
-            console.log(`ItemsTable: Found specific price ${newBasePrice} for unit [${newUnit}]`);
-          } else {
-            console.log(`ItemsTable: No specific price found for unit [${newUnit}]`);
-            
-            // Fallback to default or first available price
-            if ('default' in unitPrices) {
-              newBasePrice = parseFloat(unitPrices.default) || 0;
-              console.log(`ItemsTable: Using default price ${newBasePrice}`);
-            } else if (Object.keys(unitPrices).length > 0) {
-              const firstUnit = Object.keys(unitPrices)[0];
-              newBasePrice = parseFloat(unitPrices[firstUnit]) || 0;
-              console.log(`ItemsTable: Using fallback price ${newBasePrice} from unit [${firstUnit}]`);
-            }
-          }
-          
-          // Update the base price if we have a valid price
-          if (newBasePrice !== null && 'harga_dasar_main' in item) {
-            const currentPrice = parseFloat(safeGet(item, 'harga_dasar_main.value', 0));
-            console.log(`ItemsTable: Updating harga_dasar_main from ${currentPrice} to ${newBasePrice}`);
-            
-            // Update the base price value
-            handleItemChange(rowIndex, 'harga_dasar_main', newBasePrice);
-            
-            // Also update margins if needed
-            if ('margin_persen' in item && 'harga_jual_main' in item) {
-              const hargaJual = parseFloat(safeGet(item, 'harga_jual_main.value', 0));
-              if (hargaJual > 0 && newBasePrice > 0) {
-                const marginPersen = ((hargaJual - newBasePrice) / newBasePrice) * 100;
-                const marginRp = hargaJual - newBasePrice;
-                
-                handleItemChange(rowIndex, 'margin_persen', marginPersen);
-                handleItemChange(rowIndex, 'margin_rp', marginRp);
-                
-                console.log(`ItemsTable: Updated margins - ${marginPersen.toFixed(2)}% (${marginRp.toFixed(2)} Rp)`);
-              }
-            }
-          } else {
-            console.warn(`ItemsTable: Could not update price - newBasePrice=${newBasePrice}, has_harga_dasar_main=${('harga_dasar_main' in item)}`);
-          }
-        } else {
-          console.log(`ItemsTable: No unit prices available for price updating`);
-        }
-      }, 100); // Increased delay to ensure unit change is fully processed
-    } else {
-      console.warn(`ItemsTable: satuan_main field not found in item at row ${rowIndex}`);
-      
-      // Still call parent handler to update the unit value
-      if (handleUnitChange) {
-        handleUnitChange(rowIndex, newUnit);
-      }
     }
   };
   
@@ -348,9 +391,9 @@ const ItemsTable = ({
                         <div className="flex items-center w-full h-full">
                           <span className="truncate">{column.header}</span>
                         </div>
-                        {column.id !== 'index' && (
+                        {column.id !== 'index' && column.id !== 'action' && (
                           <div 
-                            className="resizer"
+                            className={`resizer`}
                             onMouseDown={(e) => startResize(e, column.id)}
                           />
                         )}
@@ -359,9 +402,9 @@ const ItemsTable = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {safeGet(editableData, 'output.items', []).map((item, rowIndex) => (
+                  {items.map((item, rowIndex) => (
                     <ItemsTableRow 
-                      key={rowIndex} 
+                      key={item.id || `item-${rowIndex}`} 
                       item={item} 
                       rowIndex={rowIndex} 
                       columns={columns} 
@@ -369,20 +412,40 @@ const ItemsTable = ({
                       handleItemChange={handleItemChange} 
                       searchStatus={searchStatus} 
                       handleProductCellClick={handleProductCellClick}
-                      handleUnitChange={handleUnitChangeInternal}
+                      handleUnitChange={(rIndex, newUnit) => {
+                        // Track that this row was manually changed
+                        setManuallyChangedUnitIndex(rIndex);
+                        // Then call the parent handler
+                        handleUnitChange(rIndex, newUnit);
+                      }}
                       renderDatePicker={renderDatePicker}
                       renderBooleanField={renderBooleanField}
                       handleBKPChange={handleBKPChange}
+                      onDeleteItem={onDeleteItem}
                     />
                   ))}
+                  {items.length === 0 && (
+                    <tr>
+                      <td colSpan={columns.length} className="text-center py-4 text-gray-500">
+                        No items found or added yet.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
           </div>
+          <button
+            onClick={onAddItem} 
+            className="m-4 px-3 py-2 bg-blue-500 text-white text-sm font-medium rounded hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
+            disabled={!onAddItem} 
+          >
+            + Tambah Item
+          </button>
         </div>
       </div>
     </div>
   );
-};
+});
 
 export default ItemsTable;

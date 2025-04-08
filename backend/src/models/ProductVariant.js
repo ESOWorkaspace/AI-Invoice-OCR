@@ -22,7 +22,7 @@ const ProductVariant = sequelize.define('ProductVariant', {
     }
   },
   Deskripsi: {
-    type: DataTypes.STRING(100),
+    type: DataTypes.STRING(255),
     allowNull: false,
     field: 'deskripsi'
   },

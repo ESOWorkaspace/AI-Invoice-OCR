@@ -7,7 +7,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const bodyParser = require('body-parser');
 const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '../.env') });
+require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 
 // Import database setup
 const { sequelize } = require('./config/database');
@@ -24,11 +24,12 @@ const app = express();
 
 // Configure CORS
 const allowedOrigins = [
-  process.env.FRONTEND_URL || 'http://localhost:5173',
-  'http://127.0.0.1:5173',
-  'http://127.0.0.1:57090',
-  'http://localhost:5173'
+  process.env.FRONTEND_URL || 'http://localhost:5173'
 ];
+
+console.log('CORS configuration:', {
+  allowedOrigins
+});
 
 app.use(cors({
   origin: function(origin, callback) {
@@ -65,6 +66,29 @@ app.use('/api/products', productRoutes);
 app.use('/api/product-items', productItemRoutes);
 app.use('/api/raw-ocr', rawOcrRoutes);
 
+// Add units endpoint
+app.get('/api/units', (req, res) => {
+  // Return predefined units that are commonly used
+  const units = [
+    'PCS', 'BOX', 'PACK', 'DUS', 'ROLL', 'LUSIN', 'RIM', 'SET', 
+    'UNIT', 'LEMBAR', 'METER', 'CM', 'KG', 'GRAM', 'LITER', 'ML'
+  ];
+  
+  // Additional supplier-specific units
+  const supplierUnits = [
+    'PCS', 'BOX', 'PACK', 'DUS', 'ROLL', 'LUSIN', 'RIM', 'SET', 
+    'UNIT', 'LEMBAR', 'METER', 'CM', 'KG', 'GRAM', 'LITER', 'ML',
+    'CTN', 'CARTON', 'BTL', 'BTG', 'CRT', 'SLOP', 'BAL', 'KARTON'
+  ];
+  
+  res.json({ 
+    units, 
+    supplierUnits,
+    success: true,
+    message: 'Units retrieved successfully'
+  });
+});
+
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({ 
@@ -94,10 +118,15 @@ async function startServer() {
     await sequelize.authenticate();
     console.log('Database connection established successfully.');
     
-    // Only sync in development mode
-    if (process.env.NODE_ENV === 'development') {
-      await sequelize.sync({ alter: true });
-      console.log('Database models synchronized.');
+    // Sinkronisasi model dengan database jika parameter SYNC_DB=true
+    const syncDatabase = process.env.SYNC_DB === 'true';
+
+    if (syncDatabase) {
+      console.log('Synchronizing database models...');
+      await sequelize.sync({ force: true });
+      console.log('Database synchronized successfully');
+    } else {
+      console.log('Database sync skipped. Set SYNC_DB=true to create tables automatically.');
     }
     
     app.listen(PORT, () => {

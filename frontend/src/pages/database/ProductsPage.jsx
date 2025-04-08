@@ -24,9 +24,9 @@ import {
   flexRender
 } from '@tanstack/react-table';
 import Modal from 'react-modal';
-import ProductForm from '../../components/forms/ProductForm';
+import EnhancedProductForm from '../../components/forms/ProductForms/EnhancedProductForm';
 import { debounce } from 'lodash';
-import { productItemApi } from '../../services/api';
+import { productItemApi, productApi } from '../../services/api';
 import Papa from 'papaparse';
 
 // Set appElement for react-modal
@@ -743,12 +743,54 @@ export default function ProductsPage() {
   }, [pagination, sorting, searchTerm]);
 
   // Handle search with debounce
-  const handleSearch = useCallback(
-    debounce((value) => {
-      setSearchTerm(value);
-    }, 300),
-    []
-  );
+  const handleSearch = (query) => {
+    setSearchTerm(query);
+    
+    if (query.trim() === '') {
+      fetchProducts();
+      return;
+    }
+    
+    // Try to find product by supplier code first if query is at least 3 characters
+    if (query.trim().length >= 3) {
+      setIsLoading(true);
+      
+      // First try productApi (new implementation)
+      productApi.getBySupplierCode(query.trim())
+        .then(product => {
+          if (product) {
+            // If found by supplier code, show just this product
+            setProductData([product]);
+            setTotalItems(1);
+            setIsLoading(false);
+          } else {
+            // If not found, try the productItemApi as fallback
+            return productItemApi.getProductBySupplierCode(query.trim());
+          }
+        })
+        .then(response => {
+          // Only process if this is a response from productItemApi
+          if (response && response.success && response.data) {
+            setProductData([response.data]);
+            setTotalItems(1);
+          } else if (response) {
+            // If we got a response but no product, do regular search
+            fetchProducts();
+          }
+          // If response is undefined, it means we already found a product with productApi
+        })
+        .catch(() => {
+          // On any error, fall back to regular search
+          fetchProducts();
+        })
+        .finally(() => {
+          setIsLoading(false);
+        });
+    } else {
+      // For shorter queries, just do a regular search
+      fetchProducts();
+    }
+  };
 
   // Handle adding a new product
   const handleAddProduct = () => {
@@ -1649,7 +1691,7 @@ export default function ProductsPage() {
             </button>
           </div>
           
-          <ProductForm
+          <EnhancedProductForm
             product={selectedProduct}
             onSuccess={(data) => {
               if (modalMode === 'add') {

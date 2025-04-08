@@ -487,28 +487,56 @@ export const productApi = {
   search: async (query, params = {}) => {
     if (USE_MOCK_DATA) {
       console.log(`Using mock data for product search ${query}`);
-      const lowercaseQuery = query.toLowerCase();
-      return mockData.products.filter(product => 
-        product.product_name.toLowerCase().includes(lowercaseQuery) || 
-        product.product_code.toLowerCase().includes(lowercaseQuery)
+      // Filter products by name, code, or supplier_code
+      const filteredProducts = mockData.products.filter(product => 
+        product.product_name?.toLowerCase().includes(query.toLowerCase()) || 
+        product.product_code?.toLowerCase().includes(query.toLowerCase()) ||
+        product.supplier_code?.toLowerCase().includes(query.toLowerCase())
       );
+      return filteredProducts;
     }
     
     try {
       console.log(`Searching products by ${query} via API`);
-      const response = await api.get('/api/products/search', { 
-        params: { query, ...params } 
+      const response = await api.get('/api/products/search', {
+        params: { search: query, ...params }
       });
       console.log(`Search products by ${query} API response:`, response);
       return response.data;
     } catch (error) {
       console.error(`Error searching products by ${query}: ${error.message}`);
       console.log(`Falling back to mock data for product search ${query}`);
-      const lowercaseQuery = query.toLowerCase();
-      return mockData.products.filter(product => 
-        product.product_name.toLowerCase().includes(lowercaseQuery) || 
-        product.product_code.toLowerCase().includes(lowercaseQuery)
+      const filteredProducts = mockData.products.filter(product => 
+        product.product_name?.toLowerCase().includes(query.toLowerCase()) || 
+        product.product_code?.toLowerCase().includes(query.toLowerCase()) ||
+        product.supplier_code?.toLowerCase().includes(query.toLowerCase())
       );
+      return filteredProducts;
+    }
+  },
+  
+  // Get product by supplier code
+  getBySupplierCode: async (supplierCode) => {
+    if (USE_MOCK_DATA) {
+      console.log(`Using mock data for product with supplier code ${supplierCode}`);
+      const product = mockData.products.find(product => 
+        product.supplier_code?.toLowerCase() === supplierCode.toLowerCase()
+      );
+      return product;
+    }
+    
+    try {
+      console.log(`Fetching product with supplier code ${supplierCode} from API`);
+      const response = await api.get(`/api/products/supplier/${supplierCode}`);
+      console.log(`Product with supplier code ${supplierCode} API response:`, response);
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching product with supplier code ${supplierCode}: ${error.message}`);
+      console.log(`Falling back to mock data for product with supplier code ${supplierCode}`);
+      const product = mockData.products.find(product => 
+        product.supplier_code?.toLowerCase() === supplierCode.toLowerCase()
+      );
+      return product;
     }
   },
   
@@ -564,6 +592,71 @@ export const productApi = {
     }
   },
   
+  // Create new product with all related data (variants, units, prices)
+  createProduct: async (formData) => {
+    if (USE_MOCK_DATA) {
+      console.log('Creating mock product with related data');
+      const newProductId = mockData.products.length > 0 
+        ? Math.max(...mockData.products.map(p => p.id)) + 1 
+        : 1;
+      
+      const newProduct = {
+        id: newProductId,
+        ...formData.product,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        variants: formData.variants || [],
+        units: formData.units || [],
+        prices: formData.prices || [],
+        stocks: formData.stocks || []
+      };
+      
+      mockData.products.push(newProduct);
+      return newProduct;
+    }
+    
+    try {
+      console.log('Creating product with related data via API');
+      const response = await api.post('/api/product-items/', formData);
+      console.log('Create product with related data API response:', response);
+      return response.data;
+    } catch (error) {
+      console.error(`Error creating product with related data: ${error.message}`);
+      throw error;
+    }
+  },
+  
+  // Update product with all related data (variants, units, prices)
+  updateProduct: async (id, formData) => {
+    if (USE_MOCK_DATA) {
+      console.log(`Updating mock product ${id} with related data`);
+      const index = mockData.products.findIndex(item => item.id === Number(id));
+      if (index !== -1) {
+        mockData.products[index] = {
+          ...mockData.products[index],
+          ...formData.product,
+          updated_at: new Date().toISOString(),
+          variants: formData.variants || mockData.products[index].variants || [],
+          units: formData.units || mockData.products[index].units || [],
+          prices: formData.prices || mockData.products[index].prices || [],
+          stocks: formData.stocks || mockData.products[index].stocks || []
+        };
+        return mockData.products[index];
+      }
+      throw new Error('Product not found');
+    }
+    
+    try {
+      console.log(`Updating product ${id} with related data via API`);
+      const response = await api.put(`/api/product-items/${id}`, formData);
+      console.log(`Update product ${id} with related data API response:`, response);
+      return response.data;
+    } catch (error) {
+      console.error(`Error updating product ${id} with related data: ${error.message}`);
+      throw error;
+    }
+  },
+  
   // Update product stock
   updateStock: async (id, quantityChange) => {
     if (USE_MOCK_DATA) {
@@ -609,6 +702,47 @@ export const productApi = {
       console.error(`Error deleting product ${id}: ${error.message}`);
       throw error;
     }
+  },
+  
+  // Get available units for product form
+  getAvailableUnits: async () => {
+    if (USE_MOCK_DATA) {
+      return {
+        units: [
+          'PCS', 'BOX', 'PACK', 'DUS', 'ROLL', 'LUSIN', 'RIM', 'SET', 
+          'UNIT', 'LEMBAR', 'METER', 'CM', 'KG', 'GRAM', 'LITER', 'ML'
+        ],
+        supplierUnits: [
+          'PCS', 'BOX', 'PACK', 'DUS', 'ROLL', 'LUSIN', 'RIM', 'SET', 
+          'UNIT', 'LEMBAR', 'METER', 'CM', 'KG', 'GRAM', 'LITER', 'ML',
+          'CTN', 'CARTON', 'BTL', 'BTG', 'CRT'
+        ]
+      };
+    }
+    
+    try {
+      const response = await api.get('/api/units');
+      // If the API returns a proper units structure, use it
+      if (response.data && (Array.isArray(response.data.units) || Array.isArray(response.data))) {
+        return response.data;
+      } else {
+        // Fallback
+        return {
+          units: [
+            'PCS', 'BOX', 'PACK', 'DUS', 'ROLL', 'LUSIN', 'RIM', 'SET', 
+            'UNIT', 'LEMBAR', 'METER', 'CM', 'KG', 'GRAM', 'LITER', 'ML'
+          ],
+          supplierUnits: [
+            'PCS', 'BOX', 'PACK', 'DUS', 'ROLL', 'LUSIN', 'RIM', 'SET', 
+            'UNIT', 'LEMBAR', 'METER', 'CM', 'KG', 'GRAM', 'LITER', 'ML',
+            'CTN', 'CARTON', 'BTL', 'BTG', 'CRT'
+          ]
+        };
+      }
+    } catch (error) {
+      console.error('Error fetching units:', error);
+      throw error;
+    }
   }
 };
 
@@ -617,19 +751,19 @@ export const productItemApi = {
   // Get all products with optional pagination and filtering
   getAllProducts: async (params = {}) => {
     if (USE_MOCK_DATA) {
-      console.log('Using mock data for productItems');
-      return { data: mockData.productItems || [] };
+      console.log('Using mock data for all products');
+      return mockData.products;
     }
     
     try {
-      console.log('Fetching product items from API');
-      const response = await api.get('/api/product-items/', { params });
-      console.log('Product items API response:', response);
-      return response;
+      console.log('Fetching all products from API with params:', params);
+      const response = await api.get('/api/product-items', { params });
+      console.log('All products API response:', response);
+      return response.data;
     } catch (error) {
-      console.error(`Error fetching product items: ${error.message}`);
-      console.log('Falling back to mock data for productItems');
-      return { data: mockData.productItems || [] };
+      console.error('Error fetching all products:', error);
+      console.log('Falling back to mock data for all products');
+      return mockData.products;
     }
   },
   
@@ -649,6 +783,35 @@ export const productItemApi = {
       console.error(`Error fetching product item ${id}: ${error.message}`);
       console.log(`Falling back to mock data for product item ${id}`);
       return mockData.productItems.find(item => item.ID_Produk === Number(id));
+    }
+  },
+  
+  // Get product by supplier code
+  getProductBySupplierCode: async (supplierCode) => {
+    if (USE_MOCK_DATA) {
+      console.log(`Using mock data for product with supplier code ${supplierCode}`);
+      const product = mockData.products.find(item => item.supplier_code === supplierCode);
+      return { 
+        success: true, 
+        data: product || null, 
+        message: product ? 'Product found' : 'Product not found' 
+      };
+    }
+    
+    try {
+      console.log(`Fetching product with supplier code ${supplierCode} from API`);
+      const response = await api.get(`/api/product-items/supplier/${supplierCode}`);
+      console.log(`Product with supplier code ${supplierCode} API response:`, response);
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching product with supplier code ${supplierCode}:`, error);
+      console.log(`Falling back to mock data for product with supplier code ${supplierCode}`);
+      const product = mockData.products.find(item => item.supplier_code === supplierCode);
+      return { 
+        success: true, 
+        data: product || null, 
+        message: product ? 'Product found' : 'Product not found' 
+      };
     }
   },
   
@@ -718,13 +881,60 @@ export const productItemApi = {
         }));
       }
       
-      // Update units if provided
+      // Update units if provided, including supplier_units
       if (data.units) {
         mockData.productItems[index].units = data.units.map((unit, idx) => ({
           ID_Satuan: unit.ID_Satuan || mockData.productItems.flatMap(p => p.units).length + idx + 1,
           ID_Produk: Number(id),
-          ...unit
+          ...unit,
+          // Ensure Satuan_Supplier is included
+          Satuan_Supplier: unit.Satuan_Supplier || ''
         }));
+      }
+      
+      // Update prices and map to the correct units
+      if (data.prices) {
+        const unitMap = {};
+        mockData.productItems[index].units.forEach(unit => {
+          unitMap[unit.Nama_Satuan] = unit.ID_Satuan;
+        });
+        
+        mockData.productItems[index].prices = data.prices.map((price, idx) => {
+          const unitId = unitMap[price.unitName];
+          if (!unitId) {
+            console.warn(`Unit ${price.unitName} not found for price mapping`);
+          }
+          return {
+            ID_Harga: price.ID_Harga || mockData.productItems.flatMap(p => p.prices || []).length + idx + 1,
+            ID_Produk: Number(id),
+            ID_Satuan: unitId,
+            Minimal_Qty: price.Minimal_Qty,
+            Maksimal_Qty: price.Maksimal_Qty,
+            Harga_Pokok: price.Harga_Pokok,
+            Harga_Jual: price.Harga_Jual
+          };
+        });
+      }
+      
+      // Update stocks and map to correct units
+      if (data.stocks) {
+        const unitMap = {};
+        mockData.productItems[index].units.forEach(unit => {
+          unitMap[unit.Nama_Satuan] = unit.ID_Satuan;
+        });
+        
+        mockData.productItems[index].stocks = data.stocks.map((stock, idx) => {
+          const unitId = unitMap[stock.unitName];
+          if (!unitId) {
+            console.warn(`Unit ${stock.unitName} not found for stock mapping`);
+          }
+          return {
+            ID_Stok: stock.ID_Stok || mockData.productItems.flatMap(p => p.stocks || []).length + idx + 1,
+            ID_Produk: Number(id),
+            ID_Satuan: unitId,
+            Jumlah_Stok: stock.Jumlah_Stok
+          };
+        });
       }
       
       return mockData.productItems[index];
@@ -732,6 +942,38 @@ export const productItemApi = {
     
     try {
       console.log(`Updating product item ${id} via API`);
+      
+      // Make sure all units data includes supplier_units
+      if (data.units) {
+        data.units = data.units.map(unit => ({
+          ...unit,
+          Satuan_Supplier: unit.Satuan_Supplier || ''
+        }));
+      }
+      
+      // Format prices to have the correct unit IDs
+      if (data.prices && data.units) {
+        const unitMap = {};
+        data.units.forEach(unit => {
+          if (unit.ID_Satuan) {
+            unitMap[unit.Nama_Satuan] = unit.ID_Satuan;
+          }
+        });
+        
+        // If we have IDs for the units, update the prices to reference them
+        if (Object.keys(unitMap).length > 0) {
+          data.prices = data.prices.map(price => {
+            if (unitMap[price.unitName]) {
+              return {
+                ...price,
+                ID_Satuan: unitMap[price.unitName]
+              };
+            }
+            return price;
+          });
+        }
+      }
+      
       const response = await api.put(`/api/product-items/${id}`, data);
       console.log(`Update product item ${id} API response:`, response);
       return response.data;

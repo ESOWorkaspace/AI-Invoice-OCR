@@ -20,34 +20,48 @@ export const safeGet = (obj, path, defaultValue = '') => {
 
 /**
  * Get background color class based on cell data confidence and source
- * @param {Object} cellData - Cell data object
- * @returns {string} CSS class for background color
+ * Handles both object form {value, is_confident, from_database} and separate params (value, isConfident)
+ * Priority: Missing > Low Confidence > From DB > Default
+ * 
+ * @param {Object|*} cellDataOrValue - Either the complete cell data object or just the value
+ * @param {boolean} [isConfident] - Optional confidence flag when using the second form
+ * @returns {string} CSS class for background color (e.g., 'bg-red-100', 'bg-orange-100', 'bg-green-50', or '' for default)
  */
-export const getCellBackgroundColor = (cellData) => {
-  if (!cellData) return 'bg-white';
-  
-  // Fields from database should be green
-  if (cellData.from_database) {
-    return 'bg-green-100';
+export const getCellBackgroundColor = (cellDataOrValue, isConfident) => {
+  let value;
+  let confidence = true; // Default to confident
+  let fromDatabase = false;
+
+  // Determine values based on input format
+  if (typeof cellDataOrValue === 'object' && cellDataOrValue !== null && cellDataOrValue.value !== undefined) {
+    // Object form
+    value = cellDataOrValue.value;
+    confidence = cellDataOrValue.is_confident !== false; // Treat undefined as true
+    fromDatabase = cellDataOrValue.from_database === true;
+  } else {
+    // Separate parameters form (assuming value is first param, confidence is second)
+    value = cellDataOrValue;
+    confidence = isConfident !== false; // Treat undefined/true as confident
+    // Cannot determine fromDatabase in this form
   }
-  
-  // For null or empty values
-  if (cellData.value === null || cellData.value === '' || cellData.value === undefined) {
+
+  // Priority 1: Missing value
+  if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) {
     return 'bg-red-100';
   }
-  
-  // For low confidence values
-  if (cellData.is_confident === false) {
+
+  // Priority 2: Low confidence
+  if (!confidence) {
     return 'bg-orange-100';
   }
-  
-  // For high confidence values
-  if (cellData.is_confident === true) {
-    return 'bg-white';
+
+  // Priority 3: From database (and confident and not missing)
+  if (fromDatabase) {
+    return 'bg-green-50'; // Use light green for DB source
   }
-  
-  // Default
-  return 'bg-white';
+
+  // Default: Confident, not missing, not from DB (or source unknown)
+  return ''; // Return empty string for default (usually white)
 };
 
 /**

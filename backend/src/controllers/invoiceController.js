@@ -10,58 +10,94 @@ const { sequelize } = require('../config/database'); // Fixed import path
  * Get all invoices with optional pagination
  */
 exports.getAllInvoices = async (req, res) => {
-  const requestId = uuid.v4().substring(0, 8);
-  console.log(`[${requestId}] Getting all invoices`);
+  const requestId = req.id || uuid.v4();
+  console.log(`[${requestId}] Getting all invoices (basic fields only)`);
   
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const offset = (page - 1) * limit;
+    const { page, limit } = req.query;
+    let options = {};
     
-    const invoices = await ProcessedInvoice.findAndCountAll({
-      limit,
-      offset,
+    // Apply pagination if provided
+    if (page && limit) {
+      const offset = (parseInt(page) - 1) * parseInt(limit);
+      options = {
+        offset,
+        limit: parseInt(limit)
+      };
+    }
+    
+    // Get all invoices with basic fields - Reverted to original selection
+    const invoices = await ProcessedInvoice.findAll({
+      attributes: [ // Select only the original basic fields
+        'id', 
+        'invoice_number', 
+        'supplier_name', 
+        'invoice_date', 
+        'due_date', 
+        'include_tax', 
+        'tax_rate', 
+        'document_type', 
+        'salesman',
+        'items', // Include the raw items JSON field again
+        'payment_type',
+        'created_at', 
+        'updated_at'
+      ],
+      // Removed include for ProcessedInvoiceItem
       order: [['created_at', 'DESC']],
+      ...options
     });
     
-    console.log(`[${requestId}] Found ${invoices.count} invoices`);
+    console.log(`[${requestId}] Found ${invoices.length} invoices (basic fields)`);
     
-    // Format the response data to ensure items are in the correct format
-    const formattedInvoices = invoices.rows.map(invoice => {
+    // Format response data - Reverted to original mapping
+    const formattedInvoices = invoices.map(invoice => {
       const plainInvoice = invoice.get({ plain: true });
       
-      // Ensure items is an array
-      if (!plainInvoice.items) {
-        plainInvoice.items = [];
+      // Basic validation for items field (ensure it's string or null)
+      let itemsData = plainInvoice.items;
+      if (itemsData && typeof itemsData !== 'string') {
+          try {
+              itemsData = JSON.stringify(itemsData);
+          } catch (e) {
+              console.warn(`[${requestId}] Failed to stringify items for invoice ${plainInvoice.id}, setting to null.`);
+              itemsData = null;
+          }
+      } else if (!itemsData) {
+           itemsData = null; // Ensure null if falsy
       }
       
-      // Format each item to match the frontend's expected structure
-      if (Array.isArray(plainInvoice.items)) {
-        plainInvoice.items = plainInvoice.items.map(item => ({
-          product_code: item.product_code || item.code || '',
-          product_name: item.product_name || item.name || '',
-          quantity: parseFloat(item.quantity || 0),
-          unit: item.unit || '',
-          price: parseFloat(item.price || 0),
-          total: parseFloat(item.total || 0)
-        }));
-      }
-      
-      return plainInvoice;
+      return {
+        id: plainInvoice.id,
+        invoice_number: plainInvoice.invoice_number,
+        supplier_name: plainInvoice.supplier_name,
+        invoice_date: plainInvoice.invoice_date,
+        due_date: plainInvoice.due_date,
+        include_tax: plainInvoice.include_tax,
+        tax_rate: plainInvoice.tax_rate,
+        document_type: plainInvoice.document_type,
+        salesman: plainInvoice.salesman,
+        items: itemsData, // Use the raw items JSON field
+        payment_type: plainInvoice.payment_type,
+        created_at: plainInvoice.created_at,
+        updated_at: plainInvoice.updated_at
+      };
     });
     
-    res.json({
-      total: invoices.count,
-      page,
-      limit,
-      data: formattedInvoices
+    // Return success response with invoices data
+    return res.json({
+      success: true,
+      data: formattedInvoices,
+      message: 'Invoices retrieved successfully (basic fields)'
     });
   } catch (error) {
-    console.error(`[${requestId}] Error getting invoices:`, error);
-    res.status(500).json({
+    console.error(`[${requestId}] Error getting all invoices (basic):`, error);
+    return res.status(500).json({
+      success: false,
       error: {
-        message: 'Error retrieving invoices',
-        details: error.message
+        message: 'Error retrieving invoices (basic)',
+        details: error.message,
+        stack: error.stack 
       }
     });
   }
@@ -71,9 +107,8 @@ exports.getAllInvoices = async (req, res) => {
  * Get invoice by ID
  */
 exports.getInvoiceById = async (req, res) => {
-  const requestId = uuid.v4().substring(0, 8);
+  const requestId = req.id || uuid.v4();
   const { id } = req.params;
-  
   console.log(`[${requestId}] Getting invoice by ID: ${id}`);
   
   try {
@@ -82,38 +117,40 @@ exports.getInvoiceById = async (req, res) => {
     if (!invoice) {
       console.log(`[${requestId}] Invoice not found with ID: ${id}`);
       return res.status(404).json({
+        success: false,
         error: {
           message: 'Invoice not found'
         }
       });
     }
     
-    // Format the invoice to ensure items are in the correct format
-    const plainInvoice = invoice.get({ plain: true });
+    console.log(`[${requestId}] Found invoice: ${invoice.invoice_number}`);
     
-    // Ensure items is an array
-    if (!plainInvoice.items) {
-      plainInvoice.items = [];
-    }
+    // Format invoice data
+    const formattedInvoice = {
+      id: invoice.id,
+      invoice_number: invoice.invoice_number,
+      supplier_name: invoice.supplier_name,
+      invoice_date: invoice.invoice_date,
+      due_date: invoice.due_date,
+      include_tax: invoice.include_tax,
+      tax_rate: invoice.tax_rate,
+      document_type: invoice.document_type,
+      salesman: invoice.salesman,
+      createdAt: invoice.created_at,
+      updatedAt: invoice.updated_at
+    };
     
-    // Format each item to match the frontend's expected structure
-    if (Array.isArray(plainInvoice.items)) {
-      plainInvoice.items = plainInvoice.items.map(item => ({
-        product_code: item.product_code || item.code || '',
-        product_name: item.product_name || item.name || '',
-        quantity: parseFloat(item.quantity || 0),
-        unit: item.unit || '',
-        price: parseFloat(item.price || 0),
-        total: parseFloat(item.total || 0)
-      }));
-    }
-    
-    console.log(`[${requestId}] Found invoice with ID: ${id}`);
-    
-    res.json(plainInvoice);
+    // Return success response with invoice data
+    return res.json({
+      success: true,
+      data: formattedInvoice,
+      message: 'Invoice retrieved successfully'
+    });
   } catch (error) {
-    console.error(`[${requestId}] Error getting invoice:`, error);
-    res.status(500).json({
+    console.error(`[${requestId}] Error getting invoice by ID:`, error);
+    return res.status(500).json({
+      success: false,
       error: {
         message: 'Error retrieving invoice',
         details: error.message
@@ -374,7 +411,7 @@ exports.getInvoiceImage = async (req, res) => {
  * Search invoices
  */
 exports.searchInvoices = async (req, res) => {
-  const requestId = uuid.v4().substring(0, 8);
+  const requestId = req.id || uuid.v4();
   const { query } = req.params;
   console.log(`[${requestId}] Searching invoices with query: ${query}`);
   
@@ -393,12 +430,133 @@ exports.searchInvoices = async (req, res) => {
     
     console.log(`[${requestId}] Found ${invoices.length} invoices matching query`);
     
-    res.json(invoices);
+    // Format response data
+    const formattedInvoices = invoices.map(invoice => {
+      const plainInvoice = invoice.get({ plain: true });
+      return {
+        id: plainInvoice.id,
+        invoice_number: plainInvoice.invoice_number,
+        supplier_name: plainInvoice.supplier_name,
+        invoice_date: plainInvoice.invoice_date,
+        due_date: plainInvoice.due_date,
+        include_tax: plainInvoice.include_tax,
+        tax_rate: plainInvoice.tax_rate,
+        document_type: plainInvoice.document_type,
+        salesman: plainInvoice.salesman,
+        createdAt: plainInvoice.created_at,
+        updatedAt: plainInvoice.updated_at
+      };
+    });
+    
+    // Return success response with search results
+    return res.json({
+      success: true,
+      data: formattedInvoices,
+      message: 'Invoices search completed successfully'
+    });
   } catch (error) {
     console.error(`[${requestId}] Error searching invoices:`, error);
-    res.status(500).json({
+    return res.status(500).json({
+      success: false,
       error: {
         message: 'Error searching invoices',
+        details: error.message
+      }
+    });
+  }
+};
+
+/**
+ * Get invoice details by ID
+ * GET /api/invoices/:id/details
+ */
+exports.getInvoiceDetails = async (req, res) => {
+  const requestId = req.id || uuid.v4();
+  const { id } = req.params;
+  console.log(`[${requestId}] Getting invoice details by ID: ${id}`);
+  
+  try {
+    // First find the invoice
+    const invoice = await ProcessedInvoice.findByPk(id);
+    
+    if (!invoice) {
+      console.log(`[${requestId}] Invoice not found with ID: ${id}`);
+      return res.status(404).json({
+        success: false,
+        error: {
+          message: 'Invoice not found'
+        }
+      });
+    }
+    
+    console.log(`[${requestId}] Found invoice: ${invoice.invoice_number}`);
+    
+    // Then find related items
+    let items = [];
+    try {
+      items = await ProcessedInvoiceItem.findAll({
+        where: { invoice_id: id }
+      });
+      console.log(`[${requestId}] Found ${items.length} items for invoice ${id}`);
+    } catch (itemError) {
+      console.error(`[${requestId}] Error finding invoice items:`, itemError);
+      // Continue with empty items array
+    }
+    
+    // If no items are found, return an empty array
+    if (!items || items.length === 0) {
+      return res.json({
+        success: true,
+        data: [],
+        message: 'No items found for this invoice'
+      });
+    }
+    
+    // Format item data
+    const formattedItems = items.map(item => {
+      const plainItem = item.get({ plain: true });
+      return {
+        id: plainItem.id,
+        invoice_id: plainItem.invoice_id,
+        product_code: plainItem.product_code,
+        product_name: plainItem.product_name,
+        quantity: plainItem.quantity,
+        unit: plainItem.unit,
+        base_price: plainItem.base_price,
+        price_increase_percent: plainItem.price_increase_percent,
+        price_increase_amount: plainItem.price_increase_amount,
+        suggested_increase_percent: plainItem.suggested_increase_percent,
+        suggested_increase_amount: plainItem.suggested_increase_amount,
+        discount: plainItem.discount,
+        total_price: plainItem.total_price,
+        
+        // Include alternative field names for compatibility
+        kode_barang: plainItem.product_code,
+        nama_barang: plainItem.product_name,
+        qty: plainItem.quantity,
+        satuan: plainItem.unit,
+        harga_pokok: plainItem.base_price,
+        kenaikan_persen: plainItem.price_increase_percent,
+        kenaikan_rp: plainItem.price_increase_amount,
+        saran_kenaikan_persen: plainItem.suggested_increase_percent,
+        saran_kenaikan_rp: plainItem.suggested_increase_amount,
+        diskon_persen: plainItem.discount,
+        total: plainItem.total_price
+      };
+    });
+    
+    // Return success response with item data
+    return res.json({
+      success: true,
+      data: formattedItems,
+      message: 'Invoice details retrieved successfully'
+    });
+  } catch (error) {
+    console.error(`[${requestId}] Error getting invoice details:`, error);
+    return res.status(500).json({
+      success: false,
+      error: {
+        message: 'Error retrieving invoice details',
         details: error.message
       }
     });
