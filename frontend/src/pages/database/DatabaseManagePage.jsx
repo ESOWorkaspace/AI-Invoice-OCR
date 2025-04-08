@@ -237,17 +237,66 @@ export default function DatabaseManagePage() {
         const response = await tableInfo.apiService.getAll();
         
         // Handle data that might be returned directly or inside a data property
-        const data = response && response.data ? response.data : response;
+        let data = response;
+        if (response && typeof response === 'object') {
+          data = response.data || response;
+        }
         
         console.log(`Fetched data for ${selectedTable}:`, data);
         
-        setTableData(Array.isArray(data) ? data : []);
-        setTotalRecords(Array.isArray(data) ? data.length : 0);
+        // Process the data to ensure all fields are properly formatted
+        const processedData = Array.isArray(data) ? data.map(record => {
+          const processedRecord = { ...record };
+          
+          // Handle items field
+          if (processedRecord.items) {
+            if (typeof processedRecord.items === 'string') {
+              try {
+                JSON.parse(processedRecord.items);
+              } catch (e) {
+                console.warn(`Invalid JSON in items field for record ${processedRecord.id}:`, e);
+                processedRecord.items = '[]';
+              }
+            } else if (Array.isArray(processedRecord.items)) {
+              processedRecord.items = JSON.stringify(processedRecord.items);
+            }
+          }
+          
+          // Handle payment_type and document_type
+          if (processedRecord.payment_type === null || processedRecord.payment_type === undefined) {
+            processedRecord.payment_type = '-';
+          }
+          if (processedRecord.document_type === null || processedRecord.document_type === undefined) {
+            processedRecord.document_type = '-';
+          }
+          
+          // Handle created_at and updated_at fields
+          ['created_at', 'updated_at'].forEach(field => {
+            if (processedRecord[field]) {
+              try {
+                const date = new Date(processedRecord[field]);
+                if (isNaN(date.getTime())) {
+                  throw new Error('Invalid date');
+                }
+                processedRecord[field] = date.toISOString();
+              } catch (e) {
+                console.warn(`Invalid date format in ${field} for record ${processedRecord.id}:`, e);
+                processedRecord[field] = null;
+              }
+            }
+          });
+          
+          return processedRecord;
+        }) : [];
+        
+        console.log('Processed data:', processedData);
+        setTableData(processedData);
+        setTotalRecords(processedData.length);
         
         // Update table records count
         tables.forEach(table => {
           if (table.id === selectedTable) {
-            table.records = Array.isArray(data) ? data.length : 0;
+            table.records = processedData.length;
           }
         });
         
@@ -269,8 +318,10 @@ export default function DatabaseManagePage() {
   // Format date
   const formatDate = (dateString) => {
     try {
-      return format(new Date(dateString), 'dd-MM-yyyy');
+      const date = new Date(dateString);
+      return format(date, 'dd-MM-yyyy');
     } catch (error) {
+      console.warn('Error formatting date:', dateString, error);
       return dateString;
     }
   };
@@ -292,7 +343,13 @@ export default function DatabaseManagePage() {
       case 'date':
         return formatDate(value);
       case 'datetime':
-        return format(new Date(value), 'dd-MM-yyyy HH:mm');
+        try {
+          const date = new Date(value);
+          return format(date, 'dd-MM-yyyy HH:mm:ss');
+        } catch (error) {
+          console.warn('Error formatting datetime:', value, error);
+          return value;
+        }
       case 'currency':
         return formatCurrency(value);
       case 'boolean':
@@ -302,6 +359,10 @@ export default function DatabaseManagePage() {
           const jsonObj = typeof value === 'string' ? JSON.parse(value) : value;
           return `[JSON Object]`;
         } catch (e) {
+          // If it's payment_type or document_type (they might not be in JSON format)
+          if (typeof value === 'string') {
+            return value;
+          }
           return '[Invalid JSON]';
         }
       default:
@@ -486,8 +547,47 @@ export default function DatabaseManagePage() {
         
         console.log(`Refreshed data for ${selectedTable}:`, data);
         
-        setTableData(Array.isArray(data) ? data : []);
-        setTotalRecords(Array.isArray(data) ? data.length : 0);
+        // Process the data to ensure all fields are properly formatted
+        const processedData = Array.isArray(data) ? data.map(record => {
+          const processedRecord = { ...record };
+          
+          // Handle items field
+          if (processedRecord.items && typeof processedRecord.items === 'string') {
+            try {
+              // Make sure it's valid JSON
+              JSON.parse(processedRecord.items);
+              // Keep it as a string - DatabaseTable will parse it when needed
+            } catch (e) {
+              console.warn(`Invalid JSON in items field for record ${processedRecord.id}:`, e);
+            }
+          }
+          
+          // Handle created_at and updated_at fields
+          if (processedRecord.created_at) {
+            try {
+              // Validate date format
+              new Date(processedRecord.created_at);
+            } catch (e) {
+              console.warn(`Invalid date format in created_at for record ${processedRecord.id}:`, e);
+              processedRecord.created_at = null;
+            }
+          }
+          
+          if (processedRecord.updated_at) {
+            try {
+              // Validate date format
+              new Date(processedRecord.updated_at);
+            } catch (e) {
+              console.warn(`Invalid date format in updated_at for record ${processedRecord.id}:`, e);
+              processedRecord.updated_at = null;
+            }
+          }
+          
+          return processedRecord;
+        }) : [];
+        
+        setTableData(processedData);
+        setTotalRecords(processedData.length);
         
         setIsLoading(false);
       } catch (error) {
@@ -558,8 +658,54 @@ export default function DatabaseManagePage() {
       
       console.log(`Refreshed data for ${selectedTable}:`, data);
       
-      setTableData(Array.isArray(data) ? data : []);
-      setTotalRecords(Array.isArray(data) ? data.length : 0);
+      // Process the data to ensure all fields are properly formatted
+      const processedData = Array.isArray(data) ? data.map(record => {
+        const processedRecord = { ...record };
+        
+        // Handle items field
+        if (processedRecord.items && typeof processedRecord.items === 'string') {
+          try {
+            // Make sure it's valid JSON
+            JSON.parse(processedRecord.items);
+            // Keep it as a string - DatabaseTable will parse it when needed
+          } catch (e) {
+            console.warn(`Invalid JSON in items field for record ${processedRecord.id}:`, e);
+          }
+        }
+        
+        // Handle created_at and updated_at fields
+        if (processedRecord.created_at) {
+          try {
+            // Validate date format
+            new Date(processedRecord.created_at);
+          } catch (e) {
+            console.warn(`Invalid date format in created_at for record ${processedRecord.id}:`, e);
+            processedRecord.created_at = null;
+          }
+        }
+        
+        if (processedRecord.updated_at) {
+          try {
+            // Validate date format
+            new Date(processedRecord.updated_at);
+          } catch (e) {
+            console.warn(`Invalid date format in updated_at for record ${processedRecord.id}:`, e);
+            processedRecord.updated_at = null;
+          }
+        }
+        
+        return processedRecord;
+      }) : [];
+      
+      setTableData(processedData);
+      setTotalRecords(processedData.length);
+      
+      // Update table records count
+      tables.forEach(table => {
+        if (table.id === selectedTable) {
+          table.records = processedData.length;
+        }
+      });
       
       setIsLoading(false);
       toast.success('Data refreshed successfully');

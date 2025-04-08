@@ -13,18 +13,18 @@ const ProcessedInvoice = sequelize.define('ProcessedInvoice', {
     allowNull: false
   },
   invoice_number: {
-    type: DataTypes.STRING,
+    type: DataTypes.STRING(100),
     unique: true,
     allowNull: false,
     index: true
   },
   document_type: {
-    type: DataTypes.STRING,
+    type: DataTypes.STRING(100),
     allowNull: true,
     index: true
   },
   supplier_name: {
-    type: DataTypes.STRING,
+    type: DataTypes.STRING(255),
     allowNull: true,
     index: true
   },
@@ -39,7 +39,7 @@ const ProcessedInvoice = sequelize.define('ProcessedInvoice', {
     index: true
   },
   payment_type: {
-    type: DataTypes.STRING,
+    type: DataTypes.STRING(100),
     allowNull: true
   },
   include_tax: {
@@ -48,7 +48,7 @@ const ProcessedInvoice = sequelize.define('ProcessedInvoice', {
     defaultValue: true
   },
   salesman: {
-    type: DataTypes.STRING,
+    type: DataTypes.STRING(100),
     allowNull: true
   },
   tax_rate: {
@@ -101,7 +101,7 @@ const ProcessedInvoice = sequelize.define('ProcessedInvoice', {
     }
   },
   image_path: {
-    type: DataTypes.STRING,
+    type: DataTypes.STRING(255),
     allowNull: true
   },
   image_data: {
@@ -109,7 +109,7 @@ const ProcessedInvoice = sequelize.define('ProcessedInvoice', {
     allowNull: true
   },
   image_content_type: {
-    type: DataTypes.STRING,
+    type: DataTypes.STRING(100),
     allowNull: true
   },
   created_at: {
@@ -136,6 +136,12 @@ ProcessedInvoice.associate = function(models) {
     as: 'raw_data',
     onDelete: 'CASCADE'  // Add cascade delete
   });
+
+  // Removed association with ProcessedInvoiceItem
+  // ProcessedInvoice.hasMany(models.ProcessedInvoiceItem, { 
+  //   foreignKey: 'invoice_id', 
+  //   as: 'invoiceItems' 
+  // });
 };
 
 // Add hooks to ensure JSON data is properly handled

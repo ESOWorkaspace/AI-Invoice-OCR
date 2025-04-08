@@ -13,28 +13,28 @@ const ProductItem = sequelize.define('ProductItem', {
     field: 'id_produk'
   },
   Kode_Item: {
-    type: DataTypes.STRING(20),
+    type: DataTypes.STRING(50),
     unique: true,
     allowNull: false,
     field: 'kode_item'
   },
   Nama_Item: {
-    type: DataTypes.STRING(100),
+    type: DataTypes.STRING(255),
     allowNull: false,
     field: 'nama_item'
   },
   Jenis: {
-    type: DataTypes.STRING(50),
+    type: DataTypes.STRING(100),
     allowNull: true,
     field: 'jenis'
   },
   Supplier_Code: {
-    type: DataTypes.STRING(20),
+    type: DataTypes.STRING(100),
     allowNull: true,
     field: 'supplier_code'
   },
   Supplier_Name: {
-    type: DataTypes.STRING(100),
+    type: DataTypes.STRING(255),
     allowNull: true,
     field: 'supplier_name'
   },

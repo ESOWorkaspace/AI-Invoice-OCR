@@ -251,7 +251,7 @@ exports.searchBySupplierCode = async (req, res) => {
     
     const product = await ProductItem.findOne({
       where: {
-        Supplier_Code: supplierCode
+        supplier_code: supplierCode
       }
     });
     
@@ -259,22 +259,20 @@ exports.searchBySupplierCode = async (req, res) => {
       console.log(`[${requestId}] No product found with supplier code: ${supplierCode}`);
       return res.status(200).json({
         success: true,
-        data: {
-          kode_main: 'tidak dapat ditentukan',
-          nama_main: 'tidak dapat ditentukan'
-        }
+        data: null,
+        message: 'Product not found with this supplier code'
       });
     }
     
     console.log(`[${requestId}] Found product with supplier code: ${supplierCode}`);
-    console.log(`[${requestId}] Product details:`, product.Kode_Item, product.Nama_Item);
+    console.log(`[${requestId}] Product details:`, product.kode_item, product.nama_item);
     
     return res.status(200).json({
       success: true,
       data: {
-        kode_main: product.Kode_Item,
-        nama_main: product.Nama_Item,
-        supplier_code: product.Supplier_Code
+        kode_main: product.kode_item,
+        nama_main: product.nama_item,
+        supplier_code: product.supplier_code
       }
     });
   } catch (error) {

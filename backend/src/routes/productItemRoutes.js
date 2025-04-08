@@ -5,25 +5,28 @@ const express = require('express');
 const router = express.Router();
 const productItemController = require('../controllers/productItemController');
 
-// Get all products with optional filtering
+// Get all products
 router.get('/', productItemController.getAllProducts);
 
-// Get product by ID with all related data
+// Get product by supplier code - harus diletakkan di atas route dinamis
+router.get('/supplier/:supplierCode', productItemController.getProductBySupplierCode);
+
+// Get product by ID
 router.get('/:id', productItemController.getProductById);
 
-// Create new product with all related data
+// Create new product
 router.post('/', productItemController.createProduct);
 
-// Update product and related data
+// Update product
 router.put('/:id', productItemController.updateProduct);
 
-// Delete product and all related data
+// Delete product
 router.delete('/:id', productItemController.deleteProduct);
 
-// Bulk delete multiple products
+// Bulk delete products
 router.post('/bulk-delete', productItemController.bulkDeleteProducts);
 
-// Import products in bulk
+// Import products
 router.post('/import', productItemController.importProducts);
 
 // Export all products

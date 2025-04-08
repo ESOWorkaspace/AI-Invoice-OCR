@@ -9,14 +9,19 @@ const TotalsSection = ({ editableData }) => {
   // Memoize the total calculations to avoid recalculation on every render
   const totals = useMemo(() => {
     const items = safeGet(editableData, 'output.items', []);
+    const includePpn = safeGet(editableData, 'output.include_ppn.value', false);
+    
+    const jumlahNetto = items.reduce((sum, item) => sum + parseNumber(safeGet(item, 'jumlah_netto.value', 0)), 0);
+    const ppnTotal = items.reduce((sum, item) => sum + parseNumber(safeGet(item, 'ppn.value', 0)), 0);
     
     return {
       hargaBruto: items.reduce((sum, item) => sum + parseNumber(safeGet(item, 'harga_bruto.value', 0)), 0),
       diskonRp: items.reduce((sum, item) => sum + parseNumber(safeGet(item, 'diskon_rp.value', 0)), 0),
-      jumlahNetto: items.reduce((sum, item) => sum + parseNumber(safeGet(item, 'jumlah_netto.value', 0)), 0),
-      ppn: items.reduce((sum, item) => sum + parseNumber(safeGet(item, 'ppn.value', 0)), 0),
-      includePpn: items.reduce((sum, item) => 
-        sum + parseNumber(safeGet(item, 'jumlah_netto.value', 0)) + parseNumber(safeGet(item, 'ppn.value', 0)), 0),
+      jumlahNetto: jumlahNetto,
+      ppn: ppnTotal,
+      // When include_ppn is true, the total should be the same as jumlahNetto (VAT is already included)
+      // When include_ppn is false, add the VAT to the jumlahNetto
+      includePpn: includePpn ? jumlahNetto : jumlahNetto + ppnTotal,
       marginRp: items.reduce((sum, item) => sum + parseNumber(safeGet(item, 'margin_rp.value', 0)), 0)
     };
   }, [editableData]);
@@ -62,7 +67,9 @@ const TotalsSection = ({ editableData }) => {
                   </td>
                 </tr>
                 <tr>
-                  <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-gray-100 border-r border-gray-50">Total Include PPN:</td>
+                  <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-gray-100 border-r border-gray-50">
+                    {safeGet(editableData, 'output.include_ppn.value', false) ? 'Total (PPN Termasuk):' : 'Total (PPN Ditambahkan):'}
+                  </td>
                   <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right border-b border-gray-100 border-r border-gray-50 bg-white font-bold">
                     {formatCurrency(totals.includePpn)}
                   </td>

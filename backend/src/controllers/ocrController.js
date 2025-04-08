@@ -225,13 +225,19 @@ exports.saveOcrData = async (req, res) => {
     console.log(`[${requestId}] Received OCR data structure:`, JSON.stringify(editedData, null, 2).substring(0, 500) + '...');
     
     // Extract invoice details from edited data
-    // First try to get invoice number from the proper location in OCR data structure
+    // Handle both data structures - old structure with direct output properties and new structure with everything in output
     let base_invoice_number = '';
     
+    // New structure has all fields nested within output object with value/is_confident properties
     if (editedData.output && editedData.output.nomor_referensi && editedData.output.nomor_referensi.value) {
       base_invoice_number = editedData.output.nomor_referensi.value;
       console.log(`[${requestId}] Found invoice number in OCR data: ${base_invoice_number}`);
+    } else if (editedData.nomor_referensi && editedData.nomor_referensi.value) {
+      // Direct nomor_referensi field at root level with value property
+      base_invoice_number = editedData.nomor_referensi.value;
+      console.log(`[${requestId}] Using root-level nomor_referensi: ${base_invoice_number}`);
     } else if (editedData.invoice_number) {
+      // Legacy format with direct invoice_number field
       base_invoice_number = editedData.invoice_number;
       console.log(`[${requestId}] Using provided invoice_number: ${base_invoice_number}`);
     } else {
@@ -246,13 +252,43 @@ exports.saveOcrData = async (req, res) => {
     let supplier_name = '';
     if (editedData.output && editedData.output.nama_supplier && editedData.output.nama_supplier.value) {
       supplier_name = editedData.output.nama_supplier.value;
+    } else if (editedData.nama_supplier && editedData.nama_supplier.value) {
+      supplier_name = editedData.nama_supplier.value;
     } else if (editedData.supplier_name) {
       supplier_name = editedData.supplier_name;
+    }
+    
+    // Helper function to extract value from a field that might be in different formats
+    function extractValue(data, fieldPath, defaultValue = null) {
+      // Try accessing output.fieldPath.value first (new structure)
+      if (data.output && 
+          data.output[fieldPath] && 
+          data.output[fieldPath].value !== undefined) {
+        return data.output[fieldPath].value;
+      }
+      
+      // Try accessing fieldPath.value (old structure at root level)
+      if (data[fieldPath] && 
+          data[fieldPath].value !== undefined) {
+        return data[fieldPath].value;
+      }
+      
+      // Try accessing direct property (legacy format)
+      if (data[fieldPath] !== undefined) {
+        return data[fieldPath];
+      }
+      
+      return defaultValue;
     }
     
     // Helper function to parse dates with better error handling
     function parseDate(dateValue, format = 'DD-MM-YYYY') {
       if (!dateValue) return null;
+      
+      // Handle epoch timestamp format from new structure
+      if (typeof dateValue === 'object' && dateValue.epoch) {
+        return new Date(dateValue.epoch * 1000);
+      }
       
       // If already a Date object or timestamp
       if (dateValue instanceof Date) return dateValue;
@@ -274,25 +310,23 @@ exports.saveOcrData = async (req, res) => {
       return null;
     }
     
-    // Extract invoice date
+    // Extract invoice date with new extraction function
     let invoice_date = null;
-    if (editedData.output && editedData.output.tanggal_faktur && editedData.output.tanggal_faktur.value) {
-      invoice_date = parseDate(editedData.output.tanggal_faktur.value);
+    let invoiceDateValue = extractValue(editedData, 'tanggal_faktur');
+    if (invoiceDateValue) {
+      invoice_date = parseDate(invoiceDateValue);
       console.log(`[${requestId}] Parsed invoice date: ${invoice_date}`);
-    } else if (editedData.invoice_date) {
-      invoice_date = parseDate(editedData.invoice_date);
     }
     
     // Ensure we always have a date for RawOCRData (required by model)
     const raw_ocr_invoice_date = invoice_date || new Date();
     
-    // Extract due date
+    // Extract due date with new extraction function
     let due_date = null;
-    if (editedData.output && editedData.output.tgl_jatuh_tempo && editedData.output.tgl_jatuh_tempo.value) {
-      due_date = parseDate(editedData.output.tgl_jatuh_tempo.value);
+    let dueDateValue = extractValue(editedData, 'tgl_jatuh_tempo');
+    if (dueDateValue) {
+      due_date = parseDate(dueDateValue);
       console.log(`[${requestId}] Parsed due date: ${due_date}`);
-    } else if (editedData.due_date) {
-      due_date = parseDate(editedData.due_date);
     }
     
     // Validate that invoice date is not after due date
@@ -304,44 +338,37 @@ exports.saveOcrData = async (req, res) => {
       });
     }
     
-    // Extract payment type
-    let payment_type = '';
-    if (editedData.output && editedData.output.tipe_pembayaran && editedData.output.tipe_pembayaran.value) {
-      payment_type = editedData.output.tipe_pembayaran.value;
-    } else if (editedData.payment_type) {
-      payment_type = editedData.payment_type;
+    // Extract payment type with new extraction function
+    let payment_type = extractValue(editedData, 'tipe_pembayaran', '');
+    
+    // Extract tax inclusion with new extraction function
+    let include_tax = extractValue(editedData, 'include_vat', false);
+    // Support both include_vat and include_ppn field names
+    if (include_tax === false) {
+      include_tax = extractValue(editedData, 'include_ppn', false);
     }
     
-    // Extract tax inclusion
-    let include_tax = false;
-    if (editedData.output && editedData.output.include_ppn && editedData.output.include_ppn.value !== undefined) {
-      include_tax = Boolean(editedData.output.include_ppn.value);
-    } else if (editedData.include_tax !== undefined) {
-      include_tax = Boolean(editedData.include_tax);
-    }
+    // Extract salesman with new extraction function
+    let salesman = extractValue(editedData, 'salesman', '');
     
-    // Extract salesman
-    let salesman = '';
-    if (editedData.output && editedData.output.salesman && editedData.output.salesman.value) {
-      salesman = editedData.output.salesman.value;
-    } else if (editedData.salesman) {
-      salesman = editedData.salesman;
-    }
-    
-    // Extract tax rate
-    let tax_rate = 11.0; // Default PPN rate
-    if (editedData.output && editedData.output.ppn_rate && editedData.output.ppn_rate.value) {
-      tax_rate = parseFloat(editedData.output.ppn_rate.value) || 11.0;
-    } else if (editedData.tax_rate !== undefined) {
-      tax_rate = parseFloat(editedData.tax_rate) || 11.0;
-    }
+    // Extract tax rate with new extraction function
+    let tax_rate = extractValue(editedData, 'ppn_rate', 11.0);
+    // Parse tax rate to ensure it's a number
+    tax_rate = parseFloat(tax_rate) || 11.0;
     
     // Process items - Format them according to the frontend's expected structure
     let sourceItems = [];
     
-    if (editedData.output && editedData.output.items && Array.isArray(editedData.output.items)) {
+    // Handle the new structure with items under output.output.items
+    if (editedData.output && editedData.output.output && Array.isArray(editedData.output.output.items)) {
+      sourceItems = editedData.output.output.items;
+    } 
+    // Handle the new structure with items directly under output.items
+    else if (editedData.output && Array.isArray(editedData.output.items)) {
       sourceItems = editedData.output.items;
-    } else if (editedData.items && Array.isArray(editedData.items)) {
+    } 
+    // Legacy format with items at root level
+    else if (editedData.items && Array.isArray(editedData.items)) {
       sourceItems = editedData.items;
     }
     
@@ -354,9 +381,41 @@ exports.saveOcrData = async (req, res) => {
         quantity: parseFloat(item.qty?.value || item.quantity || 0),
         unit: item.satuan?.value || item.unit || '',
         price: parseFloat(item.harga_satuan?.value || item.price || 0),
-        total: parseFloat(item.jumlah_netto?.value || item.total || 0)
+        total: parseFloat(item.jumlah_netto?.value || item.total || 0),
+        is_confident: {
+          product_code: item.kode_barang_invoice?.is_confident !== undefined ? item.kode_barang_invoice.is_confident : true,
+          product_name: item.nama_barang_invoice?.is_confident !== undefined ? item.nama_barang_invoice.is_confident : true,
+          quantity: item.qty?.is_confident !== undefined ? item.qty.is_confident : true,
+          unit: item.satuan?.is_confident !== undefined ? item.satuan.is_confident : true,
+          price: item.harga_satuan?.is_confident !== undefined ? item.harga_satuan.is_confident : true,
+          total: item.jumlah_netto?.is_confident !== undefined ? item.jumlah_netto.is_confident : true
+        }
       };
     });
+    
+    // Extract debug information from the new structure
+    let debug = [];
+    let debug_summary = "";
+    
+    if (editedData.output && editedData.output.debug && Array.isArray(editedData.output.debug)) {
+      debug = editedData.output.debug;
+    } else if (editedData.debug && Array.isArray(editedData.debug)) {
+      debug = editedData.debug;
+    }
+    
+    if (editedData.output && editedData.output.debug_summary) {
+      if (typeof editedData.output.debug_summary === 'object' && editedData.output.debug_summary.value) {
+        debug_summary = editedData.output.debug_summary.value;
+      } else {
+        debug_summary = editedData.output.debug_summary;
+      }
+    } else if (editedData.debug_summary) {
+      if (typeof editedData.debug_summary === 'object' && editedData.debug_summary.value) {
+        debug_summary = editedData.debug_summary.value;
+      } else {
+        debug_summary = editedData.debug_summary;
+      }
+    }
     
     console.log(`[${requestId}] Processed invoice data:`, {
       invoice_number,
@@ -367,7 +426,9 @@ exports.saveOcrData = async (req, res) => {
       include_tax,
       salesman,
       tax_rate,
-      items_count: items.length
+      items_count: items.length,
+      debug_count: debug.length,
+      has_debug_summary: !!debug_summary
     });
     
     // Process image data if provided
@@ -465,7 +526,9 @@ exports.saveOcrData = async (req, res) => {
           salesman,
           tax_rate,
           items, // Store as JSON object
-          updated_at: new Date()
+          updated_at: new Date(),
+          debug, // Store debug messages
+          debug_summary // Store debug summary
         };
         
         // Add binary image data if available
@@ -513,7 +576,9 @@ exports.saveOcrData = async (req, res) => {
           include_tax,
           salesman,
           tax_rate,
-          items // Store as JSON object
+          items, // Store as JSON object
+          debug, // Store debug messages
+          debug_summary // Store debug summary
         };
         
         // Add binary image data if available

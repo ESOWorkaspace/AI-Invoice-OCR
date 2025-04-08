@@ -1,0 +1,64 @@
+# OCR Invoice Processing System - Project Rules
+
+## Environment Configuration
+- There is only ONE `.env` file, located at the project root
+- Frontend must access environment variables using import.meta.env.VITE_* format
+- Backend loads environment variables using dotenv from the project root
+- Never create additional .env files in subdirectories
+- Always use the established environment variables; add new ones to the root .env file if needed
+
+## API Communication
+- Backend API endpoints are always prefixed with /api
+- Frontend always uses API_BASE_URL from environment variables for requests
+- API_BASE_URL = 'http://localhost:1512'
+- Always include proper error handling for API requests
+- API responses follow standard format: { success: true, data: [...], message: "..." }
+
+## Frontend Patterns
+- React components use functional style with hooks
+- State management uses useState and useEffect hooks
+- All API calls should use axios and include timeout settings
+- Error handling should use try/catch and provide user feedback
+- Tables use TanStack react-table
+- Form inputs use controlled components
+- Date formatting uses date-fns format function
+- Currency formatting uses Intl.NumberFormat
+
+## Data Validation
+- Validation shows confidence through cell background colors:
+  - White cells = confident data
+  - Orange cells = low confidence data
+  - Red cells = missing data
+- Always validate numeric calculations for invoice totals
+- Provide clear error messages when validation fails
+
+## Database Mapping
+- Invoice items reference products through supplier_code
+- Product database uses internal kode_item (main code)
+- When displaying product details, show both supplier_code and main product code
+- Use joins to fetch product data when needed
+- Always include fallbacks when mapping product data
+
+## UI/UX Patterns
+- Use tailwind classes for styling
+- Follow existing color scheme and component styles
+- Loading states should be clearly indicated
+- Error messages should be descriptive and actionable
+- Forms should validate input and show error messages
+- Tables should be sortable and filterable when appropriate
+- Responsive design should work on various screen sizes
+
+## Code Style
+- Use descriptive variable names with auxiliary verbs (e.g., isLoading, hasError)
+- Follow component structure patterns in the codebase
+- Include detailed comments for complex logic
+- Prefer modular functions over large monolithic functions
+- Use consistent naming conventions for files and variables
+- Organize imports logically (React, third-party, local)
+
+## Development Workflow
+- Backend runs on port 1512, frontend on port 5173
+- Start backend with: cd backend && npm run dev
+- Start frontend with: cd frontend && npm run dev
+- Run both services during development
+- Never commit .env files to version control 

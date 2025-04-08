@@ -13,71 +13,80 @@ exports.getAllProducts = async (req, res) => {
   const requestId = uuid.v4().substring(0, 8);
   console.log(`[${requestId}] Getting all products`);
   
+  // Extract query parameters
+  const { 
+    page = 1, 
+    limit = 10, 
+    search = '', 
+    sortField = 'Kode_Item', 
+    sortOrder = 'ASC',
+    filter
+  } = req.query;
+  
+  // Create where clause for searching/filtering
+  const whereClause = {};
+  
+  // Parse any filter conditions
+  if (filter) {
+    try {
+      const filterObj = JSON.parse(filter);
+      Object.assign(whereClause, filterObj);
+    } catch (error) {
+      console.error(`[${requestId}] Error parsing filter:`, error);
+    }
+  }
+  
+  console.log(`[${requestId}] Search criteria:`, whereClause);
+  
+  // Calculate offset for pagination
+  const offset = (page - 1) * limit;
+  console.log(`[${requestId}] Pagination: page=${page}, limit=${limit}, offset=${offset}`);
+  
+  // Determine sort order
+  const order = [[sortField, sortOrder]];
+  console.log(`[${requestId}] Sorting: ${sortField} ${sortOrder}`);
+  
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const offset = (page - 1) * limit;
-    const search = req.query.search || '';
-    const jenis = req.query.jenis || '';
-    const sortField = req.query.sortField || 'updated_at';
-    const sortOrder = req.query.sortOrder || 'DESC';
+    // First check if the table exists
+    const tableExists = await sequelize.query(
+      "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'produk')",
+      { type: sequelize.QueryTypes.SELECT }
+    );
     
-    // Build the where clause based on search parameters
-    const whereClause = {};
+    console.log(`[${requestId}] Table check:`, tableExists);
     
+    if (!tableExists[0].exists) {
+      return res.status(200).json({
+        success: true,
+        data: [],
+        message: "Products table doesn't exist yet"
+      });
+    }
+    
+    // Check if there are any products in the table
+    const countCheck = await sequelize.query(
+      "SELECT COUNT(*) FROM produk",
+      { type: sequelize.QueryTypes.SELECT }
+    );
+    
+    console.log(`[${requestId}] Count check:`, countCheck);
+    
+    if (parseInt(countCheck[0].count) === 0) {
+      console.log(`[${requestId}] No products found in the database`);
+      return res.status(200).json({
+        success: true,
+        data: [],
+        message: "No products found"
+      });
+    }
+    
+    // Add search conditions if search term is provided
     if (search) {
       whereClause[Op.or] = [
         { kode_item: { [Op.iLike]: `%${search}%` } },
-        { nama_item: { [Op.iLike]: `%${search}%` } }
+        { nama_item: { [Op.iLike]: `%${search}%` } },
+        { supplier_code: { [Op.iLike]: `%${search}%` } }
       ];
-    }
-    
-    if (jenis) {
-      whereClause.jenis = jenis;
-    }
-    
-    console.log(`[${requestId}] Search criteria:`, JSON.stringify(whereClause));
-    console.log(`[${requestId}] Pagination: page=${page}, limit=${limit}, offset=${offset}`);
-    console.log(`[${requestId}] Sorting: ${sortField} ${sortOrder}`);
-    
-    try {
-      // First check if the table exists and has data
-      const tableCheck = await sequelize.query(
-        "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'produk')",
-        { type: sequelize.QueryTypes.SELECT }
-      );
-      
-      console.log(`[${requestId}] Table check:`, tableCheck);
-      
-      if (!tableCheck[0].exists) {
-        console.log(`[${requestId}] Table 'produk' does not exist`);
-        return res.status(404).json({
-          error: {
-            message: 'Products table does not exist',
-            details: 'The database table for products has not been created yet'
-          }
-        });
-      }
-      
-      // Check if there are any records in the table
-      const countCheck = await sequelize.query(
-        "SELECT COUNT(*) FROM produk",
-        { type: sequelize.QueryTypes.SELECT }
-      );
-      
-      console.log(`[${requestId}] Count check:`, countCheck);
-      
-      if (parseInt(countCheck[0].count) === 0) {
-        console.log(`[${requestId}] No products found in the database`);
-        return res.json({
-          total: 0,
-          page,
-          limit,
-          data: []
-        });
-      }
-    } catch (error) {
-      console.error(`[${requestId}] Error checking table:`, error);
     }
     
     // Map the frontend sort field names to database column names
@@ -507,7 +516,13 @@ exports.getProductById = async (req, res) => {
   console.log(`[${requestId}] Getting product with ID: ${id}`);
   
   try {
-    const product = await ProductItem.findByPk(id, {
+    // First try to parse the ID as a number if it's a string containing only digits
+    let productId = id;
+    if (typeof id === 'string' && /^[0-9]+$/.test(id)) {
+      productId = parseInt(id, 10);
+    }
+    
+    const product = await ProductItem.findByPk(productId, {
       include: [
         {
           model: ProductVariant,
@@ -720,7 +735,13 @@ exports.updateProduct = async (req, res) => {
     } = req.body;
     
     // Check if product exists
-    const existingProduct = await ProductItem.findByPk(id, { transaction });
+    // First try to parse the ID as a number if it's a string containing only digits
+    let productId = id;
+    if (typeof id === 'string' && /^[0-9]+$/.test(id)) {
+      productId = parseInt(id, 10);
+    }
+    
+    const existingProduct = await ProductItem.findByPk(productId, { transaction });
     
     if (!existingProduct) {
       await transaction.rollback();
@@ -740,7 +761,7 @@ exports.updateProduct = async (req, res) => {
     if (variants) {
       // Remove existing variants
       await ProductVariant.destroy({
-        where: { ID_Produk: id },
+        where: { ID_Produk: productId },
         transaction
       });
       
@@ -748,7 +769,7 @@ exports.updateProduct = async (req, res) => {
       if (variants.length > 0) {
         const variantsWithProductId = variants.map(variant => ({
           ...variant,
-          ID_Produk: id
+          ID_Produk: productId
         }));
         
         await ProductVariant.bulkCreate(variantsWithProductId, { transaction });
@@ -760,7 +781,7 @@ exports.updateProduct = async (req, res) => {
     if (units) {
       // Get existing units to keep track of which ones are removed
       const existingUnits = await ProductUnit.findAll({
-        where: { ID_Produk: id },
+        where: { ID_Produk: productId },
         transaction
       });
       
@@ -802,7 +823,7 @@ exports.updateProduct = async (req, res) => {
           // Create new unit
           await ProductUnit.create({
             ...unitData,
-            ID_Produk: id
+            ID_Produk: productId
           }, { transaction });
         }
       }
@@ -811,7 +832,7 @@ exports.updateProduct = async (req, res) => {
       
       // Refresh the list of units after updates
       const updatedUnits = await ProductUnit.findAll({
-        where: { ID_Produk: id },
+        where: { ID_Produk: productId },
         transaction
       });
       
@@ -824,14 +845,14 @@ exports.updateProduct = async (req, res) => {
       // Handle prices - replace all for this product
       if (prices) {
         await ProductPrice.destroy({
-          where: { ID_Produk: id },
+          where: { ID_Produk: productId },
           transaction
         });
         
         if (prices.length > 0) {
           const processedPrices = prices.map(price => ({
             ...price,
-            ID_Produk: id,
+            ID_Produk: productId,
             ID_Satuan: unitNameToId[price.unitName] || price.ID_Satuan
           }));
           
@@ -843,14 +864,14 @@ exports.updateProduct = async (req, res) => {
       // Handle stocks - replace all for this product
       if (stocks) {
         await ProductStock.destroy({
-          where: { ID_Produk: id },
+          where: { ID_Produk: productId },
           transaction
         });
         
         if (stocks.length > 0) {
           const processedStocks = stocks.map(stock => ({
             ...stock,
-            ID_Produk: id,
+            ID_Produk: productId,
             ID_Satuan: unitNameToId[stock.unitName] || stock.ID_Satuan
           }));
           
@@ -864,7 +885,7 @@ exports.updateProduct = async (req, res) => {
     await transaction.commit();
     
     // Fetch the updated product with all its relations
-    const updatedProduct = await ProductItem.findByPk(id, {
+    const updatedProduct = await ProductItem.findByPk(productId, {
       include: [
         {
           model: ProductVariant,
@@ -912,8 +933,14 @@ exports.deleteProduct = async (req, res) => {
   const transaction = await sequelize.transaction();
   
   try {
+    // First try to parse the ID as a number if it's a string containing only digits
+    let productId = id;
+    if (typeof id === 'string' && /^[0-9]+$/.test(id)) {
+      productId = parseInt(id, 10);
+    }
+    
     // Check if product exists
-    const product = await ProductItem.findByPk(id, { transaction });
+    const product = await ProductItem.findByPk(productId, { transaction });
     
     if (!product) {
       await transaction.rollback();
@@ -928,23 +955,23 @@ exports.deleteProduct = async (req, res) => {
     // Delete associated data first (should cascade, but doing it explicitly for safety)
     // Delete prices and stocks first (due to foreign key constraints)
     await ProductPrice.destroy({
-      where: { ID_Produk: id },
+      where: { ID_Produk: productId },
       transaction
     });
     
     await ProductStock.destroy({
-      where: { ID_Produk: id },
+      where: { ID_Produk: productId },
       transaction
     });
     
     // Delete units and variants
     await ProductUnit.destroy({
-      where: { ID_Produk: id },
+      where: { ID_Produk: productId },
       transaction
     });
     
     await ProductVariant.destroy({
-      where: { ID_Produk: id },
+      where: { ID_Produk: productId },
       transaction
     });
     
@@ -1483,6 +1510,65 @@ exports.exportProducts = async (req, res) => {
     res.status(500).json({
       error: {
         message: 'Error exporting products',
+        details: error.message
+      }
+    });
+  }
+};
+
+/**
+ * Get product by supplier code
+ */
+exports.getProductBySupplierCode = async (req, res) => {
+  const requestId = uuid.v4().substring(0, 8);
+  const { supplierCode } = req.params;
+  console.log(`[${requestId}] Getting product with Supplier Code: ${supplierCode}`);
+  
+  try {
+    const product = await ProductItem.findOne({
+      where: { supplier_code: supplierCode },
+      include: [
+        {
+          model: ProductVariant,
+          as: 'variants'
+        },
+        {
+          model: ProductUnit,
+          as: 'units',
+          include: [
+            {
+              model: ProductPrice,
+              as: 'prices'
+            },
+            {
+              model: ProductStock,
+              as: 'stocks'
+            }
+          ]
+        }
+      ]
+    });
+    
+    if (!product) {
+      console.log(`[${requestId}] Product not found with supplier code: ${supplierCode}`);
+      return res.status(200).json({
+        success: true,
+        data: null,
+        message: 'Product not found'
+      });
+    }
+    
+    console.log(`[${requestId}] Successfully retrieved product by supplier code: ${supplierCode}`);
+    res.status(200).json({
+      success: true,
+      data: product
+    });
+  } catch (error) {
+    console.error(`[${requestId}] Error getting product by supplier code:`, error);
+    res.status(500).json({
+      success: false,
+      error: {
+        message: 'Error retrieving product',
         details: error.message
       }
     });

@@ -1,6 +1,6 @@
 import React, { memo } from 'react';
 import { safeGet, getCellBackgroundColor } from '../utils/dataHelpers';
-import { formatCurrency, parseNumber } from '../utils/dataFormatters';
+import { formatCurrency, parseNumber, formatCellValue } from '../utils/dataFormatters';
 import { EditableCell } from './UIComponents';
 
 /**
@@ -17,11 +17,36 @@ const ItemsTableRow = memo(({
   handleUnitChange,
   renderDatePicker,
   renderBooleanField,
-  handleBKPChange
+  handleBKPChange,
+  onDeleteItem
 }) => {
   return (
     <tr className="hover:bg-gray-100 group">
       {columns.map((column, colIndex) => {
+        // Special handling for the action column
+        if (column.id === 'action') {
+          return (
+             <td 
+              key={`${column.id}-${rowIndex}`} 
+              className="px-1 py-0 whitespace-nowrap text-sm text-center border-b border-gray-100 border-r border-gray-50"
+              style={{ 
+                  width: `${columnWidths[column.id]}px`,
+                  // Use a default background, or based on row hover maybe?
+                  backgroundColor: 'white' 
+              }}
+             >
+                <button
+                    onClick={() => onDeleteItem(rowIndex)} // Call onDeleteItem with rowIndex
+                    className="text-red-600 hover:text-red-800 text-xs font-semibold px-1 py-0.5"
+                    title="Hapus Item"
+                    disabled={!onDeleteItem} // Disable if handler not provided
+                >
+                    DEL
+                </button>
+             </td>
+          );
+        }
+
         // Handle index column separately
         if (column.id === 'index') {
           return (
@@ -38,7 +63,7 @@ const ItemsTableRow = memo(({
           );
         }
         
-        const cellData = safeGet(item, column.id, { value: '', is_confident: false });
+        const cellData = safeGet(item, column.id, { value: '', is_confident: false, from_database: false });
         const cellBgColor = getCellBackgroundColor(cellData);
         const bgColorMap = {
           'bg-red-100': '#fee2e2',
@@ -83,7 +108,7 @@ const ItemsTableRow = memo(({
         }
         
         // Determine cell class based on alignment and special properties
-        let cellClass = "px-3 py-3 whitespace-nowrap text-sm text-gray-900 hover-highlight ";
+        let cellClass = "px-3 py-3 whitespace-nowrap text-gray-900 hover-highlight ";
         if (column.align === 'right') cellClass += "text-right ";
         if (column.align === 'center') cellClass += "text-center ";
         if (column.special === 'suggestion') cellClass += "";
@@ -91,7 +116,8 @@ const ItemsTableRow = memo(({
         
         // Add a special class for cells that are product searchable
         if (column.id === 'kode_barang_main' || column.id === 'nama_barang_main') {
-          const needsManualSearch = searchStatus[rowIndex] === 'not_found' || searchStatus[rowIndex] === 'error';
+          const rowSearchStatus = searchStatus && searchStatus[rowIndex] ? searchStatus[rowIndex] : null;
+          const needsManualSearch = rowSearchStatus === 'not_found' || rowSearchStatus === 'error';
           
           cellClass += needsManualSearch ? 'bg-yellow-100 ' : '';
         }
@@ -146,8 +172,9 @@ const renderEditableCell = (
   
   const columnId = column.id;
   const type = column.type;
+  const isEditable = column.editable;
   const onChange = (value) => handleItemChange(rowIndex, columnId, value);
-  const cellClass = getCellBackgroundColor(item);
+  const cellBgColor = getCellBackgroundColor(item);
   
   // Special handling for product search cells
   if (columnId === 'kode_barang_main' || columnId === 'nama_barang_main') {
@@ -177,51 +204,38 @@ const renderEditableCell = (
   }
   
   // Special handling for unit selection dropdown if available_units exists
-  if (columnId === 'satuan_main' && item.available_units && item.available_units.length > 0) {
+  if (columnId === 'satuan_main' && parentItem.satuan_main?.available_units?.length > 0) {
+    // Get current value from the parentItem (full row data) which should be up-to-date
+    const currentValue = safeGet(parentItem, 'satuan_main.value', '');
+    const availableUnits = safeGet(parentItem, 'satuan_main.available_units', []);
+    // Pass the full cell data object for background calculation
+    const cellBgColorClass = getCellBackgroundColor(safeGet(parentItem, 'satuan_main')); 
+
     return (
       <select 
-        className={`w-full py-1 px-2 border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 ${cellClass}`}
-        value={item.value || ''}
+        className={`w-full py-1 px-2 border-none focus:ring-1 focus:ring-blue-500 focus:outline-none rounded text-sm ${cellBgColor}`}
+        value={currentValue} // Use value from parentItem state
         onChange={(e) => {
-          const currentUnit = item.value;
           const selectedUnit = e.target.value;
-          
-          console.log(`ItemsTableRow: Unit change | Row: ${rowIndex} | From: [${currentUnit}] | To: [${selectedUnit}]`);
-          
-          // Log all available data for debugging
-          console.log(`ItemsTableRow: Available units (${item.available_units.length}):`, item.available_units);
-          
-          // Log unit prices in detail if they exist
-          if (item.unit_prices) {
-            console.log(`ItemsTableRow: Unit prices available:`, item.unit_prices);
-            
-            // Log each unit price for easier debugging
-            console.log('ItemsTableRow: Unit price details:');
-            for (const unit in item.unit_prices) {
-              console.log(`  • Unit [${unit}] price: ${item.unit_prices[unit]}`);
-            }
-            
-            // Compare current and new prices
-            const currentPrice = currentUnit ? item.unit_prices[currentUnit] : null;
-            const newPrice = item.unit_prices[selectedUnit];
-            
-            console.log(`ItemsTableRow: Price change | From: ${currentPrice} (${currentUnit}) | To: ${newPrice} (${selectedUnit})`);
-          } else {
-            console.log(`ItemsTableRow: No unit prices available in the data`);
-          }
-          
-          // First update the local UI directly to provide immediate feedback
-          // This ensures the dropdown shows the selected value right away
-          // even if the backend update takes time
-          onChange(selectedUnit);
-          
-          // Also call the unit change handler with rowIndex and selected unit
-          // This updates the data structure and triggers price updates
-          console.log(`ItemsTableRow: Calling handleUnitChange(${rowIndex}, "${selectedUnit}")`);
-          handleUnitChange(rowIndex, selectedUnit);
+          console.log(`ItemsTableRow: Unit changed for row ${rowIndex} from "${currentValue}" to "${selectedUnit}"`);
+          // Call handleUnitChange with the row index and selected unit
+          handleUnitChange(rowIndex, selectedUnit); 
         }}
       >
-        {item.available_units.map((unit, idx) => (
+        {/* If dropdown is empty, show a placeholder */}
+        {availableUnits.length === 0 && (
+          <option value="">No units available</option>
+        )}
+        
+        {/* Ensure the currently selected value is always an option */}
+        {currentValue && !availableUnits.includes(currentValue) && (
+          <option key={`current-${currentValue}`} value={currentValue}>
+            {currentValue} (Current)
+          </option>
+        )}
+        
+        {/* Available units from the product */}
+        {availableUnits.map((unit, idx) => (
           <option key={`unit-${idx}`} value={unit}>
             {unit}
           </option>
@@ -251,38 +265,76 @@ const renderEditableCell = (
       );
       
     case 'currency':
-      return (
-        <input
-          type="text"
-          value={itemWithParent.value !== null && itemWithParent.value !== undefined ? formatCurrency(itemWithParent.value) : ''}
-          onChange={(e) => {
-            const val = parseNumber(e.target.value);
-            onChange(val);
-          }}
-          className={`w-full bg-transparent border-none p-0 focus:ring-0 focus:outline-none text-right ${cellClass}`}
-        />
-      );
+      if (isEditable) {
+        // For currency, display with formatting in edit mode
+        const numValue = parseNumber(item.value || 0);
+        const formattedValue = formatCurrency(numValue);
+        
+        return (
+          <input
+            type="text" 
+            inputMode="decimal"
+            value={formattedValue}
+            onChange={(e) => {
+              let val = e.target.value;
+              // Remove all non-digit characters except decimal separator for input
+              val = val.replace(/[^\d.,]/g, '');
+              const numericValue = parseNumber(val);
+              onChange(isNaN(numericValue) ? 0 : numericValue);
+            }}
+            className={`w-full bg-transparent border-none p-1 focus:ring-1 focus:ring-blue-500 focus:outline-none rounded text-sm ${column.align === 'right' ? 'text-right' : ''} ${cellBgColor}`}
+          />
+        );
+      } else {
+        return <span className="px-1 truncate">{formatCellValue(item.value, columnId)}</span>;
+      }
       
+    case 'number':
     case 'percentage':
-      return (
-        <input
-          type="text"
-          value={typeof itemWithParent.value === 'number' ? itemWithParent.value.toString().replace('.', ',') : (itemWithParent.value || '')}
-          onChange={(e) => {
-            // Allow only numbers and one comma as decimal separator
-            let val = e.target.value.replace(/[^0-9,]/g, '');
-            // Ensure only one comma
-            const parts = val.split(',');
-            if (parts.length > 2) {
-              val = `${parts[0]},${parts.slice(1).join('')}`;
-            }
-            // Convert to number format (replace comma with dot for JS number)
-            const numericValue = val ? parseFloat(val.replace(',', '.')) : 0;
-            onChange(isNaN(numericValue) ? 0 : numericValue);
-          }}
-          className={`w-full bg-transparent border-none p-0 focus:ring-0 focus:outline-none text-right ${cellClass}`}
-        />
-      );
+      if (isEditable) {
+        let step;
+        if (type === 'percentage' || columnId === 'diskon_persen') step = '0.01';
+        
+        let displayValueInInput = '';
+        if (item.value !== null && item.value !== undefined) {
+          if (type === 'percentage' || columnId === 'diskon_persen') {
+            displayValueInInput = String(item.value).replace('.', ',');
+          } else {
+            // For regular numbers, show with grouping separators
+            const numValue = parseNumber(item.value || 0);
+            displayValueInInput = numValue.toLocaleString('id-ID', {
+              useGrouping: true,
+              maximumFractionDigits: 0
+            });
+          }
+        }
+
+        return (
+          <input
+            type="text" 
+            inputMode="decimal"
+            value={displayValueInInput}
+            step={step}
+            onChange={(e) => {
+              let val = e.target.value;
+              let numericValue;
+              if (type === 'percentage' || columnId === 'diskon_persen') {
+                val = val.replace(/[^0-9,]/g, '');
+                const parts = val.split(',');
+                if (parts.length > 2) val = `${parts[0]},${parts.slice(1).join('')}`;
+                numericValue = parseFloat(val.replace(',', '.') || 0);
+              } else {
+                val = val.replace(/[^0-9.,]/g, '');
+                numericValue = parseNumber(val);
+              }
+              onChange(isNaN(numericValue) ? 0 : numericValue);
+            }}
+            className={`w-full bg-transparent border-none p-1 focus:ring-1 focus:ring-blue-500 focus:outline-none rounded text-sm ${column.align === 'right' ? 'text-right' : ''} ${cellBgColor}`}
+          />
+        );
+      } else {
+        return <span className="px-1 truncate">{formatCellValue(item.value, columnId)}</span>;
+      }
       
     case 'difference_percent':
       // The parentItem contains the whole row data
@@ -361,31 +413,19 @@ const renderEditableCell = (
         </div>
       );
       
-    case 'number':
-      return (
-        <input
-          type="text"
-          value={itemWithParent.value !== null && itemWithParent.value !== undefined ? itemWithParent.value : ''}
-          onChange={(e) => {
-            // Allow only numbers, commas, and dots
-            const re = /^[0-9,.]*$/;
-            if (re.test(e.target.value) || e.target.value === '') {
-              onChange(e.target.value);
-            }
-          }}
-          className={`w-full bg-transparent border-none p-0 focus:ring-0 focus:outline-none ${column.align === 'right' ? 'text-right' : ''} ${cellClass}`}
-        />
-      );
-      
     default:
-      return (
-        <input
-          type="text"
-          value={itemWithParent.value !== undefined && itemWithParent.value !== null ? itemWithParent.value : ''}
-          onChange={(e) => onChange(e.target.value)}
-          className={`w-full bg-transparent border-none p-0 focus:ring-0 focus:outline-none ${cellClass}`}
-        />
-      );
+       if (isEditable) {
+          return (
+            <input
+              type="text"
+              value={item.value ?? ''}
+              onChange={(e) => onChange(e.target.value)}
+              className={`w-full bg-transparent border-none p-1 focus:ring-1 focus:ring-blue-500 focus:outline-none rounded text-sm ${cellBgColor}`}
+            />
+          );
+       } else {
+           return <span className="px-1 truncate">{item.value ?? '-'}</span>;
+       }
   }
 };
 

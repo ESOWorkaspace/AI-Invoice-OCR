@@ -11,179 +11,144 @@ import ErrorModal from '../components/ErrorModal'
 // Import mock data for testing
 const mockData = [
   {
-    jatuh_tempo_epoch: "1741132800",
-    tanggal_faktur_epoch: "1740528000",
-    is_confident: true,
+    nomor_referensi: {
+      value: "SSP318905",
+      is_confident: true
+    },
+    nama_supplier: {
+      value: "PT SUKSES SEJATI PERKASA",
+      is_confident: true
+    },
+    tgl_jatuh_tempo: {
+      value: "05-03-2025",
+      epoch: 1741150800,
+      is_confident: true
+    },
+    tanggal_faktur: {
+      value: "26-02-2025",
+      epoch: 1740546000,
+      is_confident: true
+    },
+    tipe_dokumen: {
+      value: "Faktur",
+      is_confident: true
+    },
+    tipe_pembayaran: {
+      value: "Tunai",
+      is_confident: true
+    },
+    salesman: {
+      value: "ZUN",
+      is_confident: true
+    },
+    include_vat: {
+      value: true,
+      is_confident: true
+    },
     output: {
-      nomor_referensi: { value: "SSP318905", is_confident: true },
-      nama_supplier: { value: "PT SUKSES SEJATI PERKASA", is_confident: true },
-      tgl_jatuh_tempo: { value: "05-03-2025", is_confident: true },
-      tanggal_faktur: { value: "26-02-2025", is_confident: true },
-      tipe_dokumen: { value: "FAKTUR", is_confident: true },
-      tipe_pembayaran: { value: "Tidak disebutkan", is_confident: false },
-      salesman: { value: "ZUN", is_confident: true },
-      include_ppn: { value: true, is_confident: true },
-      ppn_rate: { value: 11, is_confident: true },
-      margin_threshold: { value: 5, is_confident: true },
-      item_keys: ["1", "2", "3", "4", "5", "6", "7"],
+      item_keys: [
+        "kode_barang_invoice",
+        "nama_barang_invoice",
+        "qty",
+        "satuan",
+        "harga_satuan",
+        "harga_bruto",
+        "diskon_persen",
+        "diskon_rp",
+        "jumlah_netto"
+      ],
       items: [
         {
-          kode_barang_invoice: { value: "12540202", is_confident: true },
-          nama_barang_invoice: { value: "MILO ACTIV-GO UHT Cabk 110ml/36", is_confident: true },
-          kode_barang_main: { value: "", is_confident: true },
-          nama_barang_main: { value: "", is_confident: true },
-          qty: { value: 5, is_confident: true },
-          satuan: { value: "CTN", is_confident: true },
-          harga_satuan: { value: 95570, is_confident: true },
-          harga_bruto: { value: 477850, is_confident: true },
-          diskon_persen: { value: 3, is_confident: true },
-          diskon_rp: { value: 14336, is_confident: true },
-          jumlah_netto: { value: 463515, is_confident: true },
-          ppn: { value: 49397, is_confident: true },
-          margin_persen: { value: "", is_confident: true },
-          margin_rp: { value: "", is_confident: true },
-          kenaikan_persen: { value: 6, is_confident: true },
-          kenaikan_rp: { value: 27811, is_confident: true },
-          saran_margin_persen: { value: 4, is_confident: true },
-          saran_margin_rp: { value: 18541, is_confident: true }
+          kode_barang_invoice: {
+            value: "12540202",
+            is_confident: true
+          },
+          nama_barang_invoice: {
+            value: "MILO ACTIV - GO UHT Cabk 110ml / 36",
+            is_confident: true
+          },
+          qty: {
+            value: 5,
+            is_confident: true
+          },
+          satuan: {
+            value: "CTN",
+            is_confident: true
+          },
+          harga_satuan: {
+            value: 95570,
+            is_confident: true
+          },
+          harga_bruto: {
+            value: 477850,
+            is_confident: true
+          },
+          diskon_persen: {
+            value: 3,
+            is_confident: true
+          },
+          diskon_rp: {
+            value: 14336,
+            is_confident: true
+          },
+          jumlah_netto: {
+            value: 463515,
+            is_confident: true
+          }
         },
         {
-          kode_barang_invoice: { value: "12540203", is_confident: false },
-          nama_barang_invoice: { value: "MILO ACTIV-GO UHT Cabk 180ml/36", is_confident: true },
-          kode_barang_main: { value: "", is_confident: true },
-          nama_barang_main: { value: "", is_confident: true },
-          qty: { value: 5, is_confident: false },
-          satuan: { value: "CTN", is_confident: true },
-          harga_satuan: { value: 163490, is_confident: true },
-          harga_bruto: { value: 817450, is_confident: true },
-          diskon_persen: { value: 3, is_confident: true },
-          diskon_rp: { value: 24524, is_confident: true },
-          jumlah_netto: { value: 792927, is_confident: true },
-          ppn: { value: 87222, is_confident: true },
-          margin_persen: { value: "", is_confident: true },
-          margin_rp: { value: "", is_confident: true },
-          kenaikan_persen: { value: 6, is_confident: true },
-          kenaikan_rp: { value: 47596, is_confident: true },
-          saran_margin_persen: { value: 4, is_confident: true },
-          saran_margin_rp: { value: 31758, is_confident: true }
-        },
-        {
-          kode_barang_invoice: { value: "12578128", is_confident: true },
-          nama_barang_invoice: { value: "DANCOW Coklat Fortigro UHT36x110ml/36", is_confident: true },
-          kode_barang_main: { value: "", is_confident: true },
-          nama_barang_main: { value: "", is_confident: true },
-          qty: { value: 5, is_confident: true },
-          satuan: { value: "CTN", is_confident: true },
-          harga_satuan: { value: 95200, is_confident: true },
-          harga_bruto: { value: 476000, is_confident: true },
-          diskon_persen: { value: 3, is_confident: true },
-          diskon_rp: { value: 14280, is_confident: true },
-          jumlah_netto: { value: 461720, is_confident: true },
-          ppn: { value: 49189, is_confident: true },
-          margin_persen: { value: "", is_confident: true },
-          margin_rp: { value: "", is_confident: true },
-          kenaikan_persen: { value: 6, is_confident: true },
-          kenaikan_rp: { value: 27643, is_confident: true },
-          saran_margin_persen: { value: 4, is_confident: true },
-          saran_margin_rp: { value: 18458, is_confident: true }
-        },
-        {
-          kode_barang_invoice: { value: "12579952", is_confident: true },
-          nama_barang_invoice: { value: "MILO ACTIV-GO SICH 20((10+1)x22g)/20", is_confident: true },
-          kode_barang_main: { value: "", is_confident: true },
-          nama_barang_main: { value: "", is_confident: true },
-          qty: { value: 5, is_confident: true },
-          satuan: { value: "CTN", is_confident: true },
-          harga_satuan: { value: 372503, is_confident: true },
-          harga_bruto: { value: 1862515, is_confident: true },
-          diskon_persen: { value: 3, is_confident: true },
-          diskon_rp: { value: 55875, is_confident: true },
-          jumlah_netto: { value: 1806640, is_confident: true },
-          ppn: { value: 198730, is_confident: true },
-          margin_persen: { value: "", is_confident: true },
-          margin_rp: { value: "", is_confident: true },
-          kenaikan_persen: { value: 6, is_confident: true },
-          kenaikan_rp: { value: 108398, is_confident: true },
-          saran_margin_persen: { value: 4, is_confident: true },
-          saran_margin_rp: { value: 72330, is_confident: true }
-        },
-        {
-          kode_barang_invoice: { value: "12578170", is_confident: true },
-          nama_barang_invoice: { value: "DANCO Instant Fortigro BIB 195g/40", is_confident: true },
-          kode_barang_main: { value: "", is_confident: true },
-          nama_barang_main: { value: "", is_confident: true },
-          qty: { value: 6, is_confident: true },
-          satuan: { value: "PCS", is_confident: true },
-          harga_satuan: { value: 24764, is_confident: true },
-          harga_bruto: { value: 148584, is_confident: true },
-          diskon_persen: { value: 0, is_confident: true },
-          diskon_rp: { value: 0, is_confident: true },
-          jumlah_netto: { value: 148584, is_confident: true },
-          ppn: { value: 16344, is_confident: true },
-          margin_persen: { value: "", is_confident: true },
-          margin_rp: { value: "", is_confident: true },
-          kenaikan_persen: { value: 6, is_confident: true },
-          kenaikan_rp: { value: 8927, is_confident: true },
-          saran_margin_persen: { value: 4, is_confident: true },
-          saran_margin_rp: { value: 5944, is_confident: true }
-        },
-        {
-          kode_barang_invoice: { value: "12578171", is_confident: true },
-          nama_barang_invoice: { value: "DANCOW Instant Frtgro SICH16(10x26g)/16", is_confident: true },
-          kode_barang_main: { value: "", is_confident: true },
-          nama_barang_main: { value: "", is_confident: true },
-          qty: { value: 15, is_confident: true },
-          satuan: { value: "CTN", is_confident: true },
-          harga_satuan: { value: 578450, is_confident: true },
-          harga_bruto: { value: 3676750, is_confident: true },
-          diskon_persen: { value: 5, is_confident: true },
-          diskon_rp: { value: 1426749, is_confident: true },
-          jumlah_netto: { value: 8250001, is_confident: false },
-          ppn: { value: 247500, is_confident: true },
-          margin_persen: { value: "", is_confident: true },
-          margin_rp: { value: "", is_confident: true },
-          kenaikan_persen: { value: 6, is_confident: true },
-          kenaikan_rp: { value: 495000, is_confident: true },
-          saran_margin_persen: { value: 4, is_confident: true },
-          saran_margin_rp: { value: 330000, is_confident: true }
-        },
-        {
-          kode_barang_invoice: { value: "12612577", is_confident: true },
-          nama_barang_invoice: { value: "DANCOW Fortgr Cok SICH ((10+1)x38g)/16", is_confident: true },
-          kode_barang_main: { value: "", is_confident: true },
-          nama_barang_main: { value: "", is_confident: true },
-          qty: { value: 10, is_confident: true },
-          satuan: { value: "CTN", is_confident: true },
-          harga_satuan: { value: 578450, is_confident: true },
-          harga_bruto: { value: 5734500, is_confident: true },
-          diskon_persen: { value: 5, is_confident: true },
-          diskon_rp: { value: 284499, is_confident: true },
-          jumlah_netto: { value: 5500001, is_confident: false },
-          ppn: { value: 600000, is_confident: true },
-          margin_persen: { value: "", is_confident: true },
-          margin_rp: { value: "", is_confident: true },
-          kenaikan_persen: { value: 6, is_confident: true },
-          kenaikan_rp: { value: 330000, is_confident: true },
-          saran_margin_persen: { value: 4, is_confident: true },
-          saran_margin_rp: { value: 220000, is_confident: true }
+          kode_barang_invoice: {
+            value: "12540203",
+            is_confident: true
+          },
+          nama_barang_invoice: {
+            value: "MILO ACTIV - GO UHT Cabk 180ml / 36",
+            is_confident: true
+          },
+          qty: {
+            value: 5,
+            is_confident: true
+          },
+          satuan: {
+            value: "CTN",
+            is_confident: true
+          },
+          harga_satuan: {
+            value: 163490,
+            is_confident: true
+          },
+          harga_bruto: {
+            value: 817450,
+            is_confident: true
+          },
+          diskon_persen: {
+            value: 3,
+            is_confident: true
+          },
+          diskon_rp: {
+            value: 24524,
+            is_confident: false
+          },
+          jumlah_netto: {
+            value: 792926,
+            is_confident: false
+          }
         }
       ],
-      debug: [
-        { item_index: 2, message: "Kuantitas diisi \"5\" berdasarkan pola baris sebelumnya karena data asli tidak terbaca." },
-        { item_index: 6, message: "Jumlah Netto tidak sesuai (seharusnya ~2.250.001)" },
-        { item_index: 7, message: "Jumlah Netto tidak sesuai (seharusnya ~5.450.001)" }
-      ],
-      summary_debug: {
-        value: "Validasi dilakukan pada setiap item, beberapa items tidak memenuhi kriteria validitas.",
-        is_confident: false
-      },
-      debug_summary: {
-        total_bruto: 13194149,
-        total_diskon: 1820263,
-        total_netto: 17423388,
-        total_ppn: 1248382,
-        total_with_ppn: 18671770
+      total_items: {
+        value: 2,
+        is_confident: true
       }
+    },
+      debug: [
+      {
+        item: 1,
+        issue: "Diskon Rp pada item 2 (24.524) tidak sesuai dengan perhitungan (3% dari 817.450 adalah 24.523,5)."
+      }
+    ],
+      debug_summary: {
+      value: "Ada beberapa ketidaksesuaian dalam perhitungan diskon dan jumlah netto pada beberapa item.",
+      is_confident: false
     }
   }
 ];
@@ -197,15 +162,6 @@ const OCR_API_ENDPOINT = import.meta.env.VITE_API_OCR_PROCESS_FILE || 'http://am
 const QUEUE_API_ENDPOINT = `${API_BASE_URL}/api/ocr/queue`;
 const STATUS_API_ENDPOINT = `${API_BASE_URL}/api/ocr/status`;
 const SAVE_API_ENDPOINT = `${API_BASE_URL}/api/ocr/save`;
-  
-console.log('API Configuration:', {
-  API_BASE_URL,
-  OCR_API_ENDPOINT,
-  QUEUE_API_ENDPOINT,
-  STATUS_API_ENDPOINT,
-  SAVE_API_ENDPOINT,
-  API_TOKEN: API_TOKEN ? '***' : 'undefined' // Tidak menampilkan token utuh
-});
 
 export default function OCRPage() {
   const [files, setFiles] = useState([]);
@@ -254,8 +210,6 @@ export default function OCRPage() {
     if (processingQueue.length === 0) return;
     
     try {
-      console.log(`Fetching file statuses from: ${STATUS_API_ENDPOINT}`);
-      
       // Gunakan endpoint yang benar dengan URL lengkap
       const response = await fetch(STATUS_API_ENDPOINT, {
         headers: {
@@ -265,22 +219,17 @@ export default function OCRPage() {
       });
       
       if (!response.ok) {
-        console.error(`Error fetching statuses: ${response.status}`);
         return; // Keluar dari fungsi jika terjadi error
       }
       
       let data;
       try {
         data = await response.json();
-        console.log("Status response data:", data);
       } catch (err) {
-        console.error(`Failed to parse status response: ${err.message}`);
         return;
       }
       
       if (data && Array.isArray(data.statuses)) {
-        console.log(`Received ${data.statuses.length} status items`);
-        
         // Buat map dari statuses untuk lookup yang lebih efisien
         const statusMap = new Map();
         data.statuses.forEach(status => {
@@ -324,9 +273,6 @@ export default function OCRPage() {
                 fileIndex: fileInfo.fileIndex,
                 updatedFromServer: true
               });
-            } else {
-              // Skip unknown files that don't have corresponding entries in fileDataMap
-              console.log(`Skipping unknown file ID: ${serverStatus.id} (not in current session)`);
             }
           }
         });
@@ -341,20 +287,14 @@ export default function OCRPage() {
               let ocrData = serverStatus.result.ocrData;
               const fileId = serverStatus.id;
               
-              console.log(`Processing completed OCR data for ${fileId}`);
-              
               // Validasi dan normalisasi struktur data OCR
               if (!ocrData) {
-                console.warn(`OCR data missing for file ${fileId}`);
                 ocrData = { output: { items: [] } };
               } else if (!ocrData.output) {
-                console.warn(`OCR data missing output property for file ${fileId}`);
                 ocrData.output = { items: [] };
               } else if (!ocrData.output.items) {
-                console.warn(`OCR data missing items array for file ${fileId}`);
                 ocrData.output.items = [];
               } else if (!Array.isArray(ocrData.output.items)) {
-                console.warn(`OCR data items is not an array for file ${fileId}`);
                 ocrData.output.items = [];
               }
               
@@ -362,8 +302,6 @@ export default function OCRPage() {
               const fileInfo = fileDataMap[fileId];
               
               if (fileInfo) {
-                console.log(`Found file info for ${fileId}, fileIndex: ${fileInfo.fileIndex}`);
-                
                 // Mark file as processed
                 setFileDataMap(prev => ({
                   ...prev,
@@ -383,7 +321,6 @@ export default function OCRPage() {
                 
                 // If this is the current file, set it as active
                 if (currentFileIndex === fileIndex) {
-                  console.log(`This is the current active file (index: ${fileIndex}), loading OCR data`);
                   setOcrResults(ocrData);
                   loadOcrData(ocrData);
                   setIsDataLoaded(true);
@@ -396,7 +333,6 @@ export default function OCRPage() {
                   );
                   
                   if (!isDuplicate) {
-                    console.log(`Adding file ${serverStatus.result.filename} to processed results list`);
                     // Add to processed results for later use with a unique identifier
                     setProcessedResults(prev => [
                       ...prev, 
@@ -412,9 +348,6 @@ export default function OCRPage() {
                     toast.success(`File ${serverStatus.result.filename} berhasil diproses dan tersedia di daftar hasil`);
                   }
                 }
-              } else {
-                // Skip processing for unknown files
-                console.log(`Skipping processing for unknown file ID: ${fileId} (not in current session)`);
               }
             }
             
@@ -444,50 +377,60 @@ export default function OCRPage() {
         
         // Update queue state
         setProcessingQueue(updatedQueue);
-      } else {
-        console.warn('Invalid status response format:', data);
       }
     } catch (error) {
-      console.error('Error fetching file statuses:', error);
+      // Silently handle error
     }
   };
   
   // Load OCR data into editable state
   const loadOcrData = (ocrData) => {
-    console.log("Loading OCR data into editable state:", ocrData);
-    
-    if (!ocrData || !ocrData.output) {
-      console.warn("Invalid OCR data structure, cannot load");
+    if (!ocrData) {
       return;
     }
     
-    // Set invoice header fields
-    if (ocrData.output.nomor_referensi) {
-      setNomorReferensi(ocrData.output.nomor_referensi.value || "");
+    // Helper function to extract value from either location
+    const extractField = (data, fieldName) => {
+      // First try the new structure with field at root level
+      if (data[fieldName] && data[fieldName].value !== undefined) {
+        return data[fieldName].value || "";
+      }
+      // Then try the old structure with fields in output
+      else if (data.output && data.output[fieldName] && data.output[fieldName].value !== undefined) {
+        return data.output[fieldName].value || "";
+      }
+      // Finally return empty string if not found
+      return "";
+    };
+    
+    // Set invoice header fields using the extract function
+    setNomorReferensi(extractField(ocrData, 'nomor_referensi'));
+    setNamaSupplier(extractField(ocrData, 'nama_supplier'));
+    setTglJatuhTempo(extractField(ocrData, 'tgl_jatuh_tempo'));
+    setTanggalFaktur(extractField(ocrData, 'tanggal_faktur'));
+    
+    // Determine where the items array is located
+    let items = [];
+    
+    // Check for structure where items are in output.output.items (nested double output)
+    if (ocrData.output && ocrData.output.output && Array.isArray(ocrData.output.output.items)) {
+      items = ocrData.output.output.items;
+    }
+    // Check for structure where items are directly in output.items 
+    else if (ocrData.output && Array.isArray(ocrData.output.items)) {
+      items = ocrData.output.items;
     }
     
-    if (ocrData.output.nama_supplier) {
-      setNamaSupplier(ocrData.output.nama_supplier.value || "");
-    }
-    
-    if (ocrData.output.tgl_jatuh_tempo) {
-      setTglJatuhTempo(ocrData.output.tgl_jatuh_tempo.value || "");
-    }
-    
-    if (ocrData.output.tanggal_faktur) {
-      setTanggalFaktur(ocrData.output.tanggal_faktur.value || "");
-    }
-    
-    // Set invoice items
-    if (Array.isArray(ocrData.output.items)) {
+    // Process the items if we found them
+    if (items.length > 0) {
       // Make sure items have all required fields for editing
-      const normalizedItems = ocrData.output.items.map(item => {
+      const normalizedItems = items.map(item => {
         // Create a normalized item with defaults for missing properties
         return {
           kode_barang_invoice: ensureProperty(item.kode_barang_invoice),
           nama_barang_invoice: ensureProperty(item.nama_barang_invoice),
-          kode_barang_main: ensureProperty(item.kode_barang_main),
-          nama_barang_main: ensureProperty(item.nama_barang_main),
+          kode_barang_main: ensureProperty(item.kode_barang_main, ""),
+          nama_barang_main: ensureProperty(item.nama_barang_main, ""),
           qty: ensureProperty(item.qty),
           satuan: ensureProperty(item.satuan),
           harga_satuan: ensureProperty(item.harga_satuan),
@@ -495,7 +438,7 @@ export default function OCRPage() {
           diskon_persen: ensureProperty(item.diskon_persen),
           diskon_rp: ensureProperty(item.diskon_rp),
           jumlah_netto: ensureProperty(item.jumlah_netto),
-          ppn: ensureProperty(item.ppn),
+          ppn: ensureProperty(item.ppn, 0),
           margin_persen: ensureProperty(item.margin_persen, ""),
           margin_rp: ensureProperty(item.margin_rp, ""),
           kenaikan_persen: ensureProperty(item.kenaikan_persen, 0),
@@ -505,10 +448,8 @@ export default function OCRPage() {
         };
       });
       
-      console.log(`Setting ${normalizedItems.length} normalized items`);
       setData(normalizedItems);
     } else {
-      console.warn("Missing or invalid items array in OCR data");
       setData([]);
     }
   };
@@ -682,7 +623,6 @@ export default function OCRPage() {
       toast.success(`${validFiles.length} file berhasil diunggah. Klik "Process File" untuk memproses.`);
       setIsUploading(false);
     } catch (error) {
-      console.error('Error in file upload:', error);
       toast.error('Terjadi kesalahan saat upload file');
       setIsUploading(false);
     }
@@ -707,8 +647,6 @@ export default function OCRPage() {
       // Trigger processing for any queued files that haven't been processed yet
       for (const queueItem of queuedFiles.filter(item => item.status === 'queued')) {
         try {
-          console.log(`Triggering processing for queued file ID: ${queueItem.id}`);
-          
           // Call the /process/:fileId endpoint to start processing
           const response = await fetch(`${API_BASE_URL}/api/ocr/process/${queueItem.id}`, {
             method: 'POST',
@@ -720,11 +658,9 @@ export default function OCRPage() {
           
           if (!response.ok) {
             const errorText = await response.text();
-            console.error(`Error triggering processing for file ${queueItem.id}: ${errorText}`);
             toast.error(`Gagal memproses file: ${response.status}`);
           } else {
             const result = await response.json();
-            console.log(`Processing triggered for file ${queueItem.id}`, result);
             toast.info(`Memproses file ${queueItem.name}...`);
             
             // Update status in UI immediately
@@ -733,7 +669,6 @@ export default function OCRPage() {
             ));
           }
         } catch (error) {
-          console.error(`Error triggering processing for file ${queueItem.id}:`, error);
           toast.error(`Gagal memproses file: ${error.message}`);
         }
       }
@@ -754,16 +689,12 @@ export default function OCRPage() {
         filesToProcess.push({ file, index });
       }
       
-      console.log(`Processing ${filesToProcess.length} files`);
-      
       // Then process each file
       for (const { file, index } of filesToProcess) {
         try {
           // Gunakan formData tanpa manipulasi tambahan (tidak mengkonversi tipe file)
           const formData = new FormData();
           formData.append('file', file); // File langsung dikirim apa adanya tanpa konversi
-          
-          console.log(`Mengirim file ${file.name} ke server untuk diproses...`);
           
           // Queue file for processing with retry mechanism
           let retries = 0;
@@ -773,8 +704,6 @@ export default function OCRPage() {
           
           while (retries <= maxRetries && !success) {
             try {
-              console.log(`Sending file to ${QUEUE_API_ENDPOINT} (attempt ${retries + 1})`);
-              
               const response = await fetch(QUEUE_API_ENDPOINT, {
                 method: 'POST',
                 headers: {
@@ -783,26 +712,19 @@ export default function OCRPage() {
                 body: formData
               });
               
-              // Log response status
-              console.log(`Server response status: ${response.status}`);
-              
               if (!response.ok) {
                 const errorText = await response.text();
-                console.error(`Error response from server: ${errorText}`);
                 throw new Error(`Error uploading file: ${response.status}`);
               }
               
               // Handle response
               const responseText = await response.text();
-              console.log(`Raw server response: ${responseText}`);
               
               let result;
               try {
                 // Attempt to parse JSON
                 result = JSON.parse(responseText);
               } catch (jsonError) {
-                console.error(`Failed to parse JSON response: ${jsonError.message}`);
-                console.log(`Invalid JSON response: ${responseText}`);
                 throw new Error(`Failed to parse server response`);
               }
               
@@ -856,8 +778,6 @@ export default function OCRPage() {
                 
                 // Immediately trigger processing for this file
                 try {
-                  console.log(`Triggering processing for file ID: ${fileId}`);
-                  
                   const processResponse = await fetch(`${API_BASE_URL}/api/ocr/process/${fileId}`, {
                     method: 'POST',
                     headers: {
@@ -866,22 +786,14 @@ export default function OCRPage() {
                     }
                   });
                   
-                  if (!processResponse.ok) {
-                    const processErrorText = await processResponse.text();
-                    console.error(`Error triggering processing for file ${fileId}: ${processErrorText}`);
-                    // Don't show toast for this error as the file is still queued
-                  } else {
-                    const processResult = await processResponse.json();
-                    console.log(`Processing triggered for file ${fileId}`, processResult);
-                    
+                  if (processResponse.ok) {
                     // Update status in UI immediately
                     setProcessingQueue(prev => prev.map(item => 
                       item.id === fileId ? {...item, status: 'processing', progress: 5} : item
                     ));
                   }
                 } catch (processError) {
-                  console.error(`Error triggering processing for file ${fileId}:`, processError);
-                  // Don't show toast for this error as the file is still queued
+                  // Continue without error toast
                 }
               } else {
                 throw new Error(`Server tidak mengembalikan fileId`);
@@ -890,23 +802,19 @@ export default function OCRPage() {
               error = err;
               retries++;
               if (retries <= maxRetries) {
-                console.log(`Mencoba ulang pengiriman file ${file.name} (percobaan ke-${retries})`);
                 await new Promise(resolve => setTimeout(resolve, 1000 * retries)); // Exponential backoff
               }
             }
           }
           
           if (!success) {
-            console.error(`Gagal mengantrian file ${file.name} setelah ${maxRetries} percobaan:`, error);
             toast.error(`Gagal mengantrian file ${file.name}: ${error.message}`);
           }
         } catch (fileError) {
-          console.error(`Error queueing file ${file.name}:`, fileError);
           toast.error(`Error queueing file ${file.name}: ${fileError.message}`);
         }
       }
     } catch (error) {
-      console.error('Error in process file:', error);
       toast.error(`Terjadi kesalahan saat memproses file: ${error.message}`);
     } finally {
       setIsProcessing(false);
@@ -941,7 +849,7 @@ export default function OCRPage() {
             reader.readAsDataURL(currentFile);
           });
         } catch (err) {
-          console.error('Error converting image to base64:', err);
+          // Continue without image data
         }
       }
       
@@ -951,12 +859,6 @@ export default function OCRPage() {
         editedData: ocrResults,    // Tambahkan editedData yang sama dengan ocrResults karena OCRResultsTable sudah mengupdate ocrResults
         imageData: imageData       // Data gambar
       };
-      
-      console.log('Sending data to server:', {
-        hasOriginalData: !!dataToSend.originalData,
-        hasEditedData: !!dataToSend.editedData,
-        hasImageData: !!dataToSend.imageData
-      });
       
       // Kirim data ke API
       const response = await fetch(SAVE_API_ENDPOINT, {
@@ -977,16 +879,15 @@ export default function OCRPage() {
             errorMessage = errorData.error.message;
           }
         } catch (e) {
-          console.error('Could not parse error response:', e);
+          // Use default error message
         }
         throw new Error(errorMessage);
       }
       
-      const result = await response.json();
+      await response.json();
       toast.success('Data berhasil disimpan!');
       
     } catch (error) {
-      console.error('Failed to save data:', error);
       toast.error(`Gagal menyimpan: ${error.message}`);
     } finally {
       setIsSaving(false);
@@ -999,13 +900,11 @@ export default function OCRPage() {
     
     // Pastikan updatedData memiliki struktur yang benar
     if (!updatedData.output) {
-      console.error('Updated data tidak memiliki properti output');
       return;
     }
     
     // Pastikan items adalah array
     if (!updatedData.output.items || !Array.isArray(updatedData.output.items)) {
-      console.warn('updatedData.output.items tidak valid, menggunakan array kosong');
       updatedData.output.items = [];
     }
     
@@ -1155,15 +1054,26 @@ export default function OCRPage() {
                         />
                       ) : null}
                       <div className="mt-4 flex justify-end">
+                        <div className="flex justify-center mt-4 gap-2">
                         <button
                           onClick={handleProcessFile}
-                          className="px-6 py-3 bg-gradient-to-r from-violet-600 to-emerald-600 text-white rounded-lg 
-                            hover:from-violet-700 hover:to-emerald-700 focus:outline-none focus:ring-2 
-                            focus:ring-violet-500 focus:ring-offset-2 shadow-md transition-all
-                            hover:shadow-lg active:shadow"
-                        >
-                          Process File
+                            disabled={isProcessing || !files || files.length === 0}
+                            className={`px-4 py-2 text-sm font-medium rounded-md ${
+                              isProcessing || !files || files.length === 0
+                                ? 'bg-gray-400 text-gray-700 cursor-not-allowed'
+                                : 'bg-blue-600 text-white hover:bg-blue-700'
+                            } transition-colors duration-150 ease-in-out`}
+                          >
+                            {isProcessing ? (
+                              <div className="flex items-center">
+                                <div className="w-4 h-4 mr-2 border-t-2 border-b-2 border-white rounded-full animate-spin"></div>
+                                Processing...
+                              </div>
+                            ) : (
+                              'Process File'
+                            )}
                         </button>
+                        </div>
                       </div>
                     </div>
                   </div>

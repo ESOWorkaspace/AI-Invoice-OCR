@@ -9,6 +9,7 @@ import ItemsTable from './ItemsTable';
 import TotalsSection from './TotalsSection';
 import DebugSection from './DebugSection';
 import ProductSearchDropdown from './ProductSearchDropdown';
+import { productItemApi } from '../services/api';
 
 /**
  * Main component for OCR results table
@@ -27,6 +28,33 @@ export default function OCRResultsTable({ data, onDataChange }) {
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:1512';
   const lastScrollY = useRef(0);
   
+  // Add a product cache to store previously fetched products
+  const [productCache, setProductCache] = useState({});
+  
+  // Track processed invoice codes to avoid redundant searches
+  const processedInvoiceCodes = useRef(new Set()).current;
+  
+  // Use refs to store function references to break circular dependencies
+  const functionRefs = useRef({
+    updateSearchStatus: null,
+    updateProductDataInItem: null,
+    searchProductByInvoiceCode: null,
+    preprocessItems: null
+  });
+  
+  // Helper function to ensure a field has the correct structure
+  const ensureField = (field, defaultValue = '') => {
+    if (!field) {
+      return { value: defaultValue, is_confident: false };
+    }
+    
+    if (typeof field === 'object' && field.value !== undefined) {
+      return field;
+    }
+    
+    return { value: field, is_confident: false };
+  };
+  
   // Restore scroll position when dropdown closes
   useEffect(() => {
     if (!dropdownOpen) {
@@ -38,12 +66,6 @@ export default function OCRResultsTable({ data, onDataChange }) {
       lastScrollY.current = window.scrollY;
     }
   }, [dropdownOpen]);
-  
-  // Add a product cache to store previously fetched products
-  const [productCache, setProductCache] = useState({});
-  
-  // Track processed invoice codes to avoid redundant searches
-  const processedInvoiceCodes = useRef(new Set()).current;
 
   // Normalize data structure if needed
   useEffect(() => {
@@ -51,24 +73,60 @@ export default function OCRResultsTable({ data, onDataChange }) {
       // Create a normalized copy of the data
       const normalizedData = { ...data };
       
+      // Helper function to extract field from either location
+      const extractField = (data, fieldName, defaultValue = null) => {
+        // First try the new structure with field at root level
+        if (data[fieldName] && data[fieldName].value !== undefined) {
+          return data[fieldName];
+        }
+        // Then try the old structure with fields in output
+        else if (data.output && data.output[fieldName] && data.output[fieldName].value !== undefined) {
+          return data.output[fieldName];
+        }
+        // Create a default object if not found
+        return {
+          value: defaultValue,
+          is_confident: false
+        };
+      };
+      
       // Ensure output exists
       if (!normalizedData.output) {
         normalizedData.output = {};
       }
       
-      // Handle case where output fields might be at the root level
-      if (!normalizedData.output.tanggal_faktur && data.tanggal_faktur) {
-        normalizedData.output.tanggal_faktur = data.tanggal_faktur;
-      }
+      // Create centralized fields in output from potential root fields
+      normalizedData.output.nomor_referensi = extractField(normalizedData, 'nomor_referensi', '');
+      normalizedData.output.nama_supplier = extractField(normalizedData, 'nama_supplier', '');
+      normalizedData.output.tanggal_faktur = extractField(normalizedData, 'tanggal_faktur', '');
+      normalizedData.output.tgl_jatuh_tempo = extractField(normalizedData, 'tgl_jatuh_tempo', '');
+      normalizedData.output.salesman = extractField(normalizedData, 'salesman', '');
       
-      // Handle case where tgl_jatuh_tempo exists but tanggal_jatuh_tempo doesn't
+      // Handle tipe_dokumen field
+      const tipeDoc = extractField(normalizedData, 'tipe_dokumen', '');
+      normalizedData.output.tipe_dokumen = tipeDoc;
+      
+      // Handle tipe_pembayaran field
+      const tipePembayaran = extractField(normalizedData, 'tipe_pembayaran', '');
+      normalizedData.output.tipe_pembayaran = tipePembayaran;
+      
+      // Handle both include_vat and include_ppn
+      const includeVat = extractField(normalizedData, 'include_vat', false);
+      const includePpn = extractField(normalizedData, 'include_ppn', false);
+      normalizedData.output.include_ppn = includeVat.value ? includeVat : includePpn;
+      
+      // Handle tanggal_jatuh_tempo vs tgl_jatuh_tempo
       if (normalizedData.output.tgl_jatuh_tempo && !normalizedData.output.tanggal_jatuh_tempo) {
         normalizedData.output.tanggal_jatuh_tempo = normalizedData.output.tgl_jatuh_tempo;
       }
       
-      // Ensure items array exists
-      if (!normalizedData.output.items) {
-        normalizedData.output.items = [];
+      // Handle debug data
+      if (normalizedData.debug && Array.isArray(normalizedData.debug)) {
+        normalizedData.output.debug = normalizedData.debug;
+      }
+      
+      if (normalizedData.debug_summary) {
+        normalizedData.output.debug_summary = normalizedData.debug_summary;
       }
       
       // Add default values for fields that should be marked as coming from database
@@ -84,9 +142,13 @@ export default function OCRResultsTable({ data, onDataChange }) {
         normalizedData.output.margin_threshold.from_database = true;
       }
       
-      // Set default include_ppn to true if not present
-      if (!normalizedData.output.include_ppn) {
-        normalizedData.output.include_ppn = { value: true, is_confident: true };
+      // Ensure items array exists, checking both structures
+      if (!normalizedData.output.items) {
+        if (normalizedData.output.output && Array.isArray(normalizedData.output.output.items)) {
+          normalizedData.output.items = normalizedData.output.output.items;
+        } else {
+          normalizedData.output.items = [];
+        }
       }
       
       // Process each item to add default values and calculate fields
@@ -156,9 +218,19 @@ export default function OCRResultsTable({ data, onDataChange }) {
           const ppnRate = parseFloat(safeGet(normalizedData, 'output.ppn_rate.value', 11));
           const jumlahNetto = parseFloat(safeGet(item, 'jumlah_netto.value', 0));
           const bkpValue = safeGet(item, 'bkp.value', true);
+          const includePpn = safeGet(normalizedData, 'output.include_ppn.value', false);
           
           if (bkpValue === true) {
-            const ppnValue = Math.round(jumlahNetto * (ppnRate / 100));
+            let ppnValue;
+            
+            // If include_ppn is true, VAT is already included in netto amount
+            // so we calculate it as a portion of the netto amount
+            if (includePpn) {
+              ppnValue = Math.round(jumlahNetto * (ppnRate / (100 + ppnRate)));
+            } else {
+              // If include_ppn is false, calculate VAT as additional
+              ppnValue = Math.round(jumlahNetto * (ppnRate / 100));
+            }
             
             if (!item.ppn) {
               item.ppn = { value: ppnValue, is_confident: true };
@@ -198,87 +270,637 @@ export default function OCRResultsTable({ data, onDataChange }) {
     if (onDataChange) onDataChange(newData);
   };
 
+  // Update search status for an item
+  const updateSearchStatus = useCallback((itemIndex, status) => {
+    setSearchStatus(prev => ({
+      ...prev,
+      [itemIndex]: status
+    }));
+  }, []);
+  
+  // Store the function in the ref
+  functionRefs.current.updateSearchStatus = updateSearchStatus;
+
+  // Function to update product data in the current item
+  const updateProductDataInItem = useCallback((product, itemIndex, unitInfo = null) => {
+    if (!product || !editableData || !editableData.output || !editableData.output.items) {
+      return;
+    }
+    
+    setEditableData(prevData => {
+      // Clone the data to avoid direct state mutation
+      const newData = { ...prevData };
+      const items = [...newData.output.items];
+      
+      // Clone the item at the index
+      if (!items[itemIndex]) return prevData;
+      const item = { ...items[itemIndex] };
+      
+      // Update item with product data
+      item.kode_barang_main = {
+        value: product.Kode_Item || '',
+        confidence: 1
+      };
+      
+      item.nama_barang_main = {
+        value: product.Nama_Item || '',
+        confidence: 1
+      };
+      
+      // Update the satuan_main object with the selected unit info if provided
+      if (unitInfo && unitInfo.selectedUnit) {
+        const { selectedUnit, baseUnit, matchReason } = unitInfo;
+        
+        item.satuan_main = {
+          value: selectedUnit.name,
+          confidence: 1,
+          conversion: selectedUnit.conversion,
+          isBaseUnit: selectedUnit.isBaseUnit,
+          matchReason: matchReason,
+          baseUnit: baseUnit.name
+        };
+        
+        // If we have invoice quantity, calculate base unit equivalent
+        const invoiceQty = parseFloat(safeGet(item, 'jumlah.value', '0')) || 0;
+        if (invoiceQty > 0 && selectedUnit.conversion) {
+          item.jumlah_base = {
+            value: (invoiceQty * selectedUnit.conversion).toString(),
+            confidence: 1
+          };
+        }
+        
+        // Find price for the selected unit if available
+        if (product.Prices && Array.isArray(product.Prices)) {
+          const matchingPrice = product.Prices.find(
+            p => p.Nama_Satuan.toLowerCase() === selectedUnit.name.toLowerCase()
+          );
+          
+          if (matchingPrice) {
+            item.harga_dasar_main = {
+              value: matchingPrice.Harga_Pokok || '0',
+              confidence: 1,
+              previous: matchingPrice.Harga_Pokok_Lama || '0'
+            };
+          }
+        }
+      } else {
+        // Basic satuan_main update if no unit info provided
+        item.satuan_main = {
+          value: safeGet(item, 'satuan.value', '') || 'PCS',
+          confidence: 0.5
+        };
+      }
+      
+      // Update the items array with the modified item
+      items[itemIndex] = item;
+      newData.output.items = items;
+      
+      // Trigger onDataChange if provided
+      if (onDataChange) {
+        onDataChange(newData);
+      }
+      
+      return newData;
+    });
+  }, [editableData, onDataChange]);
+  
+  // Store the function in the ref
+  functionRefs.current.updateProductDataInItem = updateProductDataInItem;
+
   // Memoize the search function to prevent dependency issues
-  const searchProductByInvoiceCode = useCallback(function searchProductByInvoiceCode(invoiceCode, itemIndex) {
-    // Remove console log
+  const searchProductByInvoiceCode = useCallback(async (invoiceCode, itemIndex) => {
+    console.log(`OCRResultsTable: Searching for product with code: ${invoiceCode} for item ${itemIndex}`);
     
     if (!invoiceCode) {
-      // Remove console warn
+      console.warn(`OCRResultsTable: Empty invoice code for item ${itemIndex}`);
+      functionRefs.current.updateSearchStatus(itemIndex, 'notfound');
       return;
     }
     
-    // Ensure itemIndex is valid
-    if (itemIndex === undefined || itemIndex === null) {
-      // Remove console warn
-      return;
-    }
-    
-    // Check if the product is already in cache
+    // Skip if we already have this product in cache
     if (productCache[invoiceCode]) {
-      // Remove console log
+      console.log(`OCRResultsTable: Using cached product data for ${invoiceCode}`);
+      functionRefs.current.updateProductDataInItem(productCache[invoiceCode], itemIndex);
+      functionRefs.current.updateSearchStatus(itemIndex, 'found');
+      return;
+    }
+    
+    // Update search status to loading
+    functionRefs.current.updateSearchStatus(itemIndex, 'loading');
+    
+    try {
+      // Get the current item data (use ref to break dependency)
+      const currentItem = { ...(editableData?.output?.items?.[itemIndex] || {}) };
+      const invoiceUnitName = safeGet(currentItem, 'satuan.value', '').trim().toLowerCase();
+      const invoicePrice = parseFloat(safeGet(currentItem, 'harga_satuan.value', '0')) || 0;
       
-      const product = productCache[invoiceCode];
+      console.log(`OCRResultsTable: Item ${itemIndex} info:`, {
+        invoiceCode,
+        invoiceUnitName,
+        invoicePrice
+      });
       
-      // Product found - update the item
+      // Search by supplier code
+      const product = await productItemApi.getProductBySupplierCode(invoiceCode);
+      
+      if (!product) {
+        console.warn(`OCRResultsTable: No product found with supplier code ${invoiceCode}`);
+        functionRefs.current.updateSearchStatus(itemIndex, 'notfound');
+        return;
+      }
+      
+      console.log(`OCRResultsTable: Found product:`, product);
+      
+      // Add to product cache
+      setProductCache(prev => ({ ...prev, [invoiceCode]: product }));
+      
+      // Collect supplier unit information
+      const supplierUnits = {};
+      const availableUnits = [];
+      
+      if (product.Units && Array.isArray(product.Units)) {
+        product.Units.forEach(unit => {
+          // Add to available units
+          availableUnits.push({
+            name: unit.Nama_Satuan,
+            conversion: unit.Nilai_Konversi || 1,
+            isBaseUnit: unit.Is_Base === 1
+          });
+          
+          // Map supplier units if available
+          if (unit.Satuan_Supplier) {
+            supplierUnits[unit.Satuan_Supplier.toLowerCase()] = {
+              mainUnit: unit.Nama_Satuan,
+              conversion: unit.Nilai_Konversi || 1,
+              isBaseUnit: unit.Is_Base === 1
+            };
+          }
+        });
+      }
+      
+      // Build unit prices map
+      const unitPrices = {};
+      if (product.Prices && Array.isArray(product.Prices)) {
+        product.Prices.forEach(price => {
+          unitPrices[price.Nama_Satuan.toLowerCase()] = parseFloat(price.Harga_Jual) || 0;
+        });
+      }
+      
+      console.log(`OCRResultsTable: Unit mapping info:`, {
+        supplierUnits,
+        availableUnits,
+        unitPrices,
+        invoiceUnitName
+      });
+      
+      // Priority-based unit selection
+      let selectedUnit = null;
+      let matchReason = '';
+      
+      // 1. Direct mapping from supplier units
+      if (invoiceUnitName && supplierUnits[invoiceUnitName]) {
+        selectedUnit = {
+          name: supplierUnits[invoiceUnitName].mainUnit,
+          conversion: supplierUnits[invoiceUnitName].conversion,
+          isBaseUnit: supplierUnits[invoiceUnitName].isBaseUnit
+        };
+        matchReason = 'Exact supplier unit match';
+        console.log(`OCRResultsTable: Found exact supplier unit match: ${invoiceUnitName} → ${selectedUnit.name}`);
+      }
+      
+      // 2. Match based on price if we have invoice price
+      if (!selectedUnit && invoicePrice > 0) {
+        // Calculate price difference percentage for each unit
+        const priceMatches = Object.entries(unitPrices).map(([unitName, unitPrice]) => {
+          const priceDiff = Math.abs(invoicePrice - unitPrice);
+          const percentageDiff = unitPrice > 0 ? (priceDiff / unitPrice) * 100 : 100;
+          
+          // Find the corresponding unit in availableUnits
+          const unitInfo = availableUnits.find(u => u.name.toLowerCase() === unitName.toLowerCase());
+          
+          return {
+            unitName,
+            unitPrice,
+            percentageDiff,
+            conversion: unitInfo?.conversion || 1,
+            isBaseUnit: unitInfo?.isBaseUnit || false
+          };
+        });
+        
+        // Sort by percentage difference
+        priceMatches.sort((a, b) => a.percentageDiff - b.percentageDiff);
+        
+        // Use the closest price match if within 20% threshold
+        if (priceMatches.length > 0 && priceMatches[0].percentageDiff <= 20) {
+          const bestMatch = priceMatches[0];
+          selectedUnit = {
+            name: bestMatch.unitName,
+            conversion: bestMatch.conversion,
+            isBaseUnit: bestMatch.isBaseUnit
+          };
+          matchReason = `Price match (${bestMatch.percentageDiff.toFixed(2)}% difference)`;
+          console.log(`OCRResultsTable: Found unit by price match: ${bestMatch.unitName} with price ${bestMatch.unitPrice} (${bestMatch.percentageDiff.toFixed(2)}% diff from invoice price ${invoicePrice})`);
+        }
+      }
+      
+      // 3. Check previously confirmed mappings in the user preferences
+      if (!selectedUnit && invoiceUnitName) {
+        // This would ideally check a user preference store for previously confirmed mappings
+        // For now, it's a placeholder for future implementation
+      }
+      
+      // 4. Use the first available unit with a price as fallback
+      if (!selectedUnit) {
+        const unitWithPrice = Object.keys(unitPrices)[0];
+        if (unitWithPrice) {
+          const unitInfo = availableUnits.find(u => u.name.toLowerCase() === unitWithPrice.toLowerCase());
+          if (unitInfo) {
+            selectedUnit = {
+              name: unitInfo.name,
+              conversion: unitInfo.conversion,
+              isBaseUnit: unitInfo.isBaseUnit
+            };
+            matchReason = 'First unit with price';
+            console.log(`OCRResultsTable: Using first unit with price: ${unitInfo.name}`);
+          }
+        }
+      }
+      
+      // 5. Last resort: use fuzzy text matching if still no match
+      if (!selectedUnit && invoiceUnitName) {
+        // Simple similarity check (could be improved with proper fuzzy matching)
+        let bestSimilarity = 0;
+        let bestMatch = null;
+        
+        availableUnits.forEach(unit => {
+          // Simple character-based similarity (can be replaced with better algorithm)
+          const similarity = calculateStringSimilarity(
+            invoiceUnitName.toLowerCase(),
+            unit.name.toLowerCase()
+          );
+          
+          if (similarity > bestSimilarity && similarity > 0.5) { // 50% threshold
+            bestSimilarity = similarity;
+            bestMatch = unit;
+          }
+        });
+        
+        if (bestMatch) {
+          selectedUnit = {
+            name: bestMatch.name,
+            conversion: bestMatch.conversion,
+            isBaseUnit: bestMatch.isBaseUnit
+          };
+          matchReason = `Text similarity (${(bestSimilarity * 100).toFixed(2)}%)`;
+          console.log(`OCRResultsTable: Found unit by text similarity: ${bestMatch.name} (${(bestSimilarity * 100).toFixed(2)}% similar to ${invoiceUnitName})`);
+        }
+      }
+      
+      // 6. Last resort: Use the base unit or first unit
+      if (!selectedUnit) {
+        const baseUnit = availableUnits.find(u => u.isBaseUnit);
+        if (baseUnit) {
+          selectedUnit = {
+            name: baseUnit.name,
+            conversion: baseUnit.conversion,
+            isBaseUnit: baseUnit.isBaseUnit
+          };
+          matchReason = 'Base unit fallback';
+          console.log(`OCRResultsTable: Using base unit as fallback: ${baseUnit.name}`);
+        } else if (availableUnits.length > 0) {
+          selectedUnit = {
+            name: availableUnits[0].name,
+            conversion: availableUnits[0].conversion,
+            isBaseUnit: availableUnits[0].isBaseUnit
+          };
+          matchReason = 'First available unit';
+          console.log(`OCRResultsTable: Using first available unit: ${availableUnits[0].name}`);
+        }
+      }
+      
+      // If we still don't have a unit, create a basic one
+      if (!selectedUnit && invoiceUnitName) {
+        selectedUnit = {
+          name: invoiceUnitName,
+          conversion: 1,
+          isBaseUnit: true
+        };
+        matchReason = 'Created from invoice';
+        console.log(`OCRResultsTable: Created unit from invoice: ${invoiceUnitName}`);
+      }
+      
+      // Process the product data using function from ref
+      if (functionRefs.current.updateProductDataInItem) {
+        if (selectedUnit) {
+          console.log(`OCRResultsTable: Selected unit for item ${itemIndex}: ${selectedUnit.name} (${matchReason})`);
+          
+          // Base unit information for conversion calculations
+          const baseUnit = availableUnits.find(u => u.isBaseUnit) || {
+            name: selectedUnit.name,
+            conversion: 1,
+            isBaseUnit: true
+          };
+          
+          // Update the product data in the item
+          functionRefs.current.updateProductDataInItem(product, itemIndex, {
+            selectedUnit,
+            baseUnit,
+            matchReason
+          });
+          
+          functionRefs.current.updateSearchStatus(itemIndex, 'found');
+        } else {
+          console.warn(`OCRResultsTable: Could not determine unit for item ${itemIndex} with code ${invoiceCode}`);
+          functionRefs.current.updateProductDataInItem(product, itemIndex);
+          functionRefs.current.updateSearchStatus(itemIndex, 'found');
+        }
+      }
+    } catch (error) {
+      console.error(`OCRResultsTable: Error searching for product ${invoiceCode}:`, error);
+      functionRefs.current.updateSearchStatus(itemIndex, 'error');
+    }
+  }, [editableData, productCache]); // Minimal dependencies
+  
+  // Store the function in the ref
+  functionRefs.current.searchProductByInvoiceCode = searchProductByInvoiceCode;
+
+  // Function to preprocess items and initialize product data
+  const preprocessItems = useCallback((data) => {
+    if (!data || !data.output || !data.output.items || !data.output.items.length) {
+      return;
+    }
+    
+    console.log('OCRResultsTable: Preprocessing items for unit mapping');
+    
+    // Create a batch of items to process
+    const itemsToProcess = data.output.items.filter(item => {
+      const invoiceCode = safeGet(item, 'kode_barang.value', '');
+      return invoiceCode && !productCache[invoiceCode];
+    });
+    
+    // If no items to process, return early
+    if (!itemsToProcess.length) {
+      return;
+    }
+    
+    // For each item with a kode_barang, trigger a search using ref
+    data.output.items.forEach((item, index) => {
+      const invoiceCode = safeGet(item, 'kode_barang.value', '');
+      
+      if (invoiceCode) {
+        console.log(`OCRResultsTable: Pre-loading product data for item ${index} with code ${invoiceCode}`);
+        
+        // Add to pending searches
+        setPendingSearches(prev => ({
+          ...prev,
+          [index]: invoiceCode
+        }));
+        
+        // Trigger search for product data using function from ref
+        if (functionRefs.current.searchProductByInvoiceCode) {
+          setTimeout(() => {
+            functionRefs.current.searchProductByInvoiceCode(invoiceCode, index);
+          }, 0);
+        }
+      }
+    });
+  }, [productCache]); // Only one dependency
+  
+  // Store the function in the ref
+  functionRefs.current.preprocessItems = preprocessItems;
+
+  // Effect to initialize data when data changes - only run once
+  useEffect(() => {
+    // Only do this once when the component mounts or data changes
+    const dataInitializationKey = JSON.stringify({
+      hasData: !!data,
+      itemCount: data?.output?.items?.length || 0
+    });
+    
+    if (data) {
+      // Normalize data fields and initialize editableData
+      const normalizedData = {
+        output: {
+          ...data.output,
+          items: (data.output.items || []).map((item, index) => ({
+            ...item,
+            // Add a unique id for each item if not exists
+            id: item.id || `item-${index}`,
+            // Ensure all required fields exist with proper structure
+            kode_barang: ensureField(item.kode_barang),
+            nama_barang: ensureField(item.nama_barang),
+            kode_barang_main: ensureField(item.kode_barang_main),
+            nama_barang_main: ensureField(item.nama_barang_main),
+            jumlah: ensureField(item.jumlah),
+            satuan: ensureField(item.satuan),
+            satuan_main: ensureField(item.satuan_main),
+            harga_satuan: ensureField(item.harga_satuan),
+            harga_total: ensureField(item.harga_total),
+            diskon: ensureField(item.diskon, '0'), // Default to 0
+            harga_diskon: ensureField(item.harga_diskon),
+            harga_dasar_main: ensureField(item.harga_dasar_main)
+          }))
+        }
+      };
+      
+      setEditableData(normalizedData);
+      
+      // Initialize search status for all items
+      const initialSearchStatus = {};
+      (normalizedData.output.items || []).forEach((item, index) => {
+        initialSearchStatus[index] = 'pending';
+      });
+      setSearchStatus(initialSearchStatus);
+      
+      if (onDataChange) {
+        onDataChange(normalizedData);
+      }
+    }
+  }, [data?.id, data?.output?.id]); // Only depend on data id, not the entire object
+
+  // Add a dedicated effect for product lookup that runs only after component and functions are initialized
+  useEffect(() => {
+    if (!editableData?.output?.items) return;
+    
+    console.log('OCRResultsTable: Running initial product lookup for all items');
+    
+    // Slightly delay the lookup to ensure all functions are properly initialized
+    const lookupTimer = setTimeout(() => {
+      // Check for items with invoice codes but without main product data
+      const itemsToProcess = editableData.output.items
+        .map((item, index) => ({
+          index,
+          invoiceCode: safeGet(item, 'kode_barang.value', '') ||
+                       safeGet(item, 'kode_barang_invoice.value', '')
+        }))
+        .filter(({ invoiceCode, index }) => {
+          // Only process items that have an invoice code but not a main code
+          const hasInvoiceCode = !!invoiceCode;
+          const hasMainCode = !!safeGet(editableData, `output.items[${index}].kode_barang_main.value`, '');
+          
+          return hasInvoiceCode && !hasMainCode;
+        });
+      
+      console.log(`OCRResultsTable: Found ${itemsToProcess.length} items to process`);
+      
+      // Process each item one by one with slight delay to prevent race conditions
+      if (itemsToProcess.length > 0) {
+        itemsToProcess.forEach(({ invoiceCode, index }, i) => {
+          setTimeout(() => {
+            console.log(`OCRResultsTable: Processing item ${index} with code ${invoiceCode}`);
+            // Use the function from ref to search for the product
+            if (functionRefs.current.searchProductByInvoiceCode) {
+              functionRefs.current.searchProductByInvoiceCode(invoiceCode, index);
+            }
+          }, i * 100); // Stagger lookups by 100ms each
+        });
+      }
+    }, 500); // Wait 500ms to ensure component is fully mounted
+    
+    return () => clearTimeout(lookupTimer);
+  }, [editableData?.output?.items?.length]); // Only run when items array changes
+
+  // Handle changes to item fields
+  const handleItemChange = useCallback((rowIndex, field, value) => {
       const newData = { ...editableData };
-      
-      // Update the item data
-      if (newData.output.items && newData.output.items[itemIndex]) {
-        newData.output.items[itemIndex].kode_barang_main = {
-          ...newData.output.items[itemIndex].kode_barang_main,
+    const item = newData.output.items && newData.output.items[rowIndex];
+    
+    if (!item) return;
+    
+    // Update the field value
+    item[field] = {
+      ...item[field],
+                  value: value,
+                  is_confident: true
+                };
+    
+    // Special case for kode_barang_invoice
+    // If this field changes and there's a valid value, try to search for the product
+    if (field === 'kode_barang_invoice' && value) {
+      // Check if we already have this product in cache
+      if (productCache[value]) {
+        // Use cached product
+        const product = productCache[value];
+        
+        // Update kode_barang_main and nama_barang_main
+        item.kode_barang_main = {
+          ...item.kode_barang_main,
           value: product.product_code || '',
           is_confident: true
         };
         
-        newData.output.items[itemIndex].nama_barang_main = {
-          ...newData.output.items[itemIndex].nama_barang_main,
+        item.nama_barang_main = {
+          ...item.nama_barang_main,
           value: product.product_name || '',
           is_confident: true
         };
         
-        // If available, update other fields
-        if (product.unit) {
-          const supplierUnit = product.supplier_unit || '';
+        // Determine supplier unit and unit information
+        let supplierUnit = '';
+        if (product.supplier_unit && typeof product.supplier_unit === 'string') {
+          supplierUnit = product.supplier_unit;
+        } else if (product.satuan_supplier) {
+          supplierUnit = product.satuan_supplier;
+        }
+        
+        // Get all available units for the product
+        const availableUnits = product.units && product.units.length > 0 ? 
+          product.units : [product.unit].filter(Boolean);
           
-          newData.output.items[itemIndex].satuan_main = {
-            ...newData.output.items[itemIndex].satuan_main,
-            value: product.unit,
-            is_confident: true,
-            supplier_unit: supplierUnit // Store supplier unit in this field
-          };
+        // Get unit prices
+        let unitPrices = product.unit_prices || {};
+        
+        // Determine the best unit to use
+        let unitToUse = '';
+        let userSupplierUnit = '';
+        
+        // First priority: Check if the item already has a satuan (supplier unit) field
+        if (item.satuan && item.satuan.value) {
+          userSupplierUnit = item.satuan.value;
           
-          // Also update the satuan field with supplier unit if it exists
-          if (supplierUnit && newData.output.items[itemIndex].satuan) {
-            newData.output.items[itemIndex].satuan = {
-              ...newData.output.items[itemIndex].satuan,
-              value: supplierUnit,
-              is_confident: true
-            };
+          // Find the corresponding main unit for this supplier unit
+          if (product.supplier_units && typeof product.supplier_units === 'object') {
+            // Look up the main unit that corresponds to this supplier unit
+            for (const [mainUnit, supUnit] of Object.entries(product.supplier_units)) {
+              if (supUnit === userSupplierUnit) {
+                unitToUse = mainUnit;
+                break;
+              }
+            }
+          }
+          
+          // If we couldn't find a match, try supplier_unit if it's an object (reverse mapping)
+          if (!unitToUse && product.supplier_unit && typeof product.supplier_unit === 'object') {
+            for (const [mainUnit, supUnit] of Object.entries(product.supplier_unit)) {
+              if (supUnit === userSupplierUnit) {
+                unitToUse = mainUnit;
+                break;
+              }
+            }
           }
         }
         
-        // Use base_price (harga_pokok) instead of price for harga_dasar_main
-        if (product.base_price !== undefined || product.harga_pokok !== undefined) {
-          newData.output.items[itemIndex].harga_dasar_main = {
-            ...newData.output.items[itemIndex].harga_dasar_main,
-            value: parseFloat(product.base_price || product.harga_pokok),
+        // Second priority: Use the product unit if no match found
+        if (!unitToUse) {
+          unitToUse = product.unit || (availableUnits.length > 0 ? availableUnits[0] : '');
+          
+          // Try to get corresponding supplier unit for this main unit
+          if (product.supplier_unit && typeof product.supplier_unit === 'object') {
+            userSupplierUnit = product.supplier_unit[unitToUse] || supplierUnit;
+          } else if (supplierUnit) {
+            userSupplierUnit = supplierUnit;
+          }
+        }
+        
+        // Update satuan_main with proper unit and metadata
+        if (unitToUse) {
+          item.satuan_main = {
+            ...item.satuan_main,
+            value: unitToUse,
+            is_confident: true,
+            available_units: availableUnits,
+            unit_prices: unitPrices,
+            supplier_unit: userSupplierUnit
+          };
+        }
+        
+        // Update satuan field with supplier unit if available
+        if (userSupplierUnit && item.satuan) {
+          item.satuan = {
+            ...item.satuan,
+            value: userSupplierUnit,
             is_confident: true
           };
         }
         
+        // Use base_price (harga_pokok) for the selected unit
+        const basePrice = unitToUse && unitPrices[unitToUse] ? 
+          parseFloat(unitPrices[unitToUse]) : 
+          parseFloat(product.base_price || product.harga_pokok) || 0;
+        
+        if (item.harga_dasar_main) {
+          item.harga_dasar_main = {
+            ...item.harga_dasar_main,
+            value: basePrice,
+          is_confident: true
+        };
+        }
+        
         setEditableData(newData);
-        if (onDataChange) onDataChange(newData);
+        if (onDataChange) {
+          onDataChange(newData);
+        }
       }
       
       setSearchStatus(prev => ({
         ...prev,
-        [itemIndex]: 'found'
+        [rowIndex]: 'found'
       }));
       
       // Remove from pending searches
       setPendingSearches(prev => {
         const newPending = { ...prev };
-        delete newPending[itemIndex];
+        delete newPending[rowIndex];
         return newPending;
       });
       
@@ -288,13 +910,13 @@ export default function OCRResultsTable({ data, onDataChange }) {
     try {
       setSearchStatus(prev => ({
         ...prev,
-        [itemIndex]: 'searching'
+        [rowIndex]: 'searching'
       }));
       
       // Use the new API endpoint for invoice code search
       axios.get(`${API_BASE_URL}/api/products/invoice`, {
         params: { invoiceCode },
-        timeout: 8000 // Add timeout to prevent hanging requests
+        timeout: 600000 // Add timeout of 10 minutes to prevent hanging requests
       })
       .then(response => {
         // Check if the response has the expected format and contains data
@@ -312,6 +934,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
           
           // Product found - update the item
           const newData = { ...editableData };
+          const item = newData.output.items[rowIndex];
           
           // Update product mapping for dropdown reference
           setProductMapping(prev => ({
@@ -320,195 +943,165 @@ export default function OCRResultsTable({ data, onDataChange }) {
           }));
           
           // Update the item data
-          if (newData.output.items && newData.output.items[itemIndex]) {
-            newData.output.items[itemIndex].kode_barang_main = {
-              ...newData.output.items[itemIndex].kode_barang_main,
+          if (item) {
+            // Update main code and name
+            item.kode_barang_main = {
+              ...item.kode_barang_main,
               value: product.product_code || '',
                   is_confident: true
                 };
             
-            newData.output.items[itemIndex].nama_barang_main = {
-              ...newData.output.items[itemIndex].nama_barang_main,
+            item.nama_barang_main = {
+              ...item.nama_barang_main,
               value: product.product_name || '',
-                  is_confident: true
-                };
+              is_confident: true
+            };
             
-            // If available, update other fields
-            if (product.unit) {
-              const supplierUnit = product.supplier_unit || '';
+            // Determine supplier unit and unit information
+            let supplierUnit = '';
+            if (product.supplier_unit && typeof product.supplier_unit === 'string') {
+              supplierUnit = product.supplier_unit;
+            } else if (product.satuan_supplier) {
+              supplierUnit = product.satuan_supplier;
+            }
+            
+            // Get all available units for the product
+            const availableUnits = product.units && product.units.length > 0 ? 
+              product.units : [product.unit].filter(Boolean);
               
-              newData.output.items[itemIndex].satuan_main = {
-                ...newData.output.items[itemIndex].satuan_main,
-                value: product.unit,
-                is_confident: true,
-                supplier_unit: supplierUnit // Store supplier unit in this field
-              };
+            // Get unit prices
+            let unitPrices = product.unit_prices || {};
+            
+            // Determine the best unit to use
+            let unitToUse = '';
+            let userSupplierUnit = '';
+            
+            // First priority: Check if the item already has a satuan (supplier unit) field
+            if (item.satuan && item.satuan.value) {
+              userSupplierUnit = item.satuan.value;
               
-              // Also update the satuan field with supplier unit if it exists
-              if (supplierUnit && newData.output.items[itemIndex].satuan) {
-                newData.output.items[itemIndex].satuan = {
-                  ...newData.output.items[itemIndex].satuan,
-                  value: supplierUnit,
-                  is_confident: true
-                };
+              // Find the corresponding main unit for this supplier unit
+              if (product.supplier_units && typeof product.supplier_units === 'object') {
+                // Look up the main unit that corresponds to this supplier unit
+                for (const [mainUnit, supUnit] of Object.entries(product.supplier_units)) {
+                  if (supUnit === userSupplierUnit) {
+                    unitToUse = mainUnit;
+                    break;
+                  }
+                }
+              }
+              
+              // If we couldn't find a match, try supplier_unit if it's an object (reverse mapping)
+              if (!unitToUse && product.supplier_unit && typeof product.supplier_unit === 'object') {
+                for (const [mainUnit, supUnit] of Object.entries(product.supplier_unit)) {
+                  if (supUnit === userSupplierUnit) {
+                    unitToUse = mainUnit;
+                    break;
+                  }
+                }
               }
             }
             
-            // Use base_price (harga_pokok) instead of price for harga_dasar_main
-            if (product.base_price !== undefined || product.harga_pokok !== undefined) {
-              newData.output.items[itemIndex].harga_dasar_main = {
-                ...newData.output.items[itemIndex].harga_dasar_main,
-                value: parseFloat(product.base_price || product.harga_pokok),
+            // Second priority: Use the product unit if no match found
+            if (!unitToUse) {
+              unitToUse = product.unit || (availableUnits.length > 0 ? availableUnits[0] : '');
+              
+              // Try to get corresponding supplier unit for this main unit
+              if (product.supplier_unit && typeof product.supplier_unit === 'object') {
+                userSupplierUnit = product.supplier_unit[unitToUse] || supplierUnit;
+              } else if (supplierUnit) {
+                userSupplierUnit = supplierUnit;
+              }
+            }
+            
+            // Update satuan_main with proper unit and metadata
+            if (unitToUse) {
+              item.satuan_main = {
+                ...item.satuan_main,
+                value: unitToUse,
+                is_confident: true,
+                available_units: availableUnits,
+                unit_prices: unitPrices,
+                supplier_unit: userSupplierUnit
+              };
+            }
+            
+            // Update satuan field with supplier unit if available
+            if (userSupplierUnit && item.satuan) {
+              item.satuan = {
+                ...item.satuan,
+                value: userSupplierUnit,
+                  is_confident: true
+                };
+            }
+            
+            // Use base_price (harga_pokok) for the selected unit
+            const basePrice = unitToUse && unitPrices[unitToUse] ? 
+              parseFloat(unitPrices[unitToUse]) : 
+              parseFloat(product.base_price || product.harga_pokok) || 0;
+            
+            if (item.harga_dasar_main) {
+              item.harga_dasar_main = {
+                ...item.harga_dasar_main,
+                value: basePrice,
                     is_confident: true 
                   };
             }
             
             setEditableData(newData);
-            if (onDataChange) onDataChange(newData);
+            if (onDataChange) {
+              onDataChange(newData);
+            }
           }
           
           setSearchStatus(prev => ({
             ...prev,
-            [itemIndex]: 'found'
+            [rowIndex]: 'found'
           }));
         } else {
           // No results found
-          // Remove console warn
           setSearchStatus(prev => ({
             ...prev,
-            [itemIndex]: 'not_found'
+            [rowIndex]: 'not_found'
           }));
         }
         
         // Remove from pending searches
         setPendingSearches(prev => {
           const newPending = { ...prev };
-          delete newPending[itemIndex];
+          delete newPending[rowIndex];
           return newPending;
         });
       })
       .catch(error => {
-        // Remove console error
-        
         // Set search status to error
         setSearchStatus(prev => ({
           ...prev,
-          [itemIndex]: 'error'
+          [rowIndex]: 'error'
         }));
         
         // Remove from pending searches
         setPendingSearches(prev => {
           const newPending = { ...prev };
-          delete newPending[itemIndex];
+          delete newPending[rowIndex];
           return newPending;
         });
       });
     } catch (error) {
-      // Remove console error
-      
       // Set search status to error
       setSearchStatus(prev => ({
         ...prev,
-        [itemIndex]: 'error'
+        [rowIndex]: 'error'
       }));
       
       // Remove from pending searches
       setPendingSearches(prev => {
         const newPending = { ...prev };
-        delete newPending[itemIndex];
+        delete newPending[rowIndex];
         return newPending;
       });
     }
   }, [API_BASE_URL, editableData, onDataChange, productCache, setProductCache, setProductMapping, setSearchStatus, setPendingSearches]);
-
-  // Handle changes to item fields
-  const handleItemChange = useCallback((rowIndex, field, value) => {
-    const newData = { ...editableData };
-    
-    // Update the field value
-    if (newData.output.items && newData.output.items[rowIndex]) {
-      newData.output.items[rowIndex][field] = {
-        ...newData.output.items[rowIndex][field],
-                  value: value,
-                  is_confident: true
-                };
-      
-      // Special case for kode_barang_invoice
-      // If this field changes and there's a valid value, try to search for the product
-      if (field === 'kode_barang_invoice' && value) {
-        // Check if we already have this product in cache
-        if (productCache[value]) {
-          // Use cached product
-          const product = productCache[value];
-          
-          newData.output.items[rowIndex].kode_barang_main = {
-            ...newData.output.items[rowIndex].kode_barang_main,
-            value: product.product_code || '',
-            is_confident: true
-          };
-          
-          newData.output.items[rowIndex].nama_barang_main = {
-            ...newData.output.items[rowIndex].nama_barang_main,
-            value: product.product_name || '',
-            is_confident: true
-          };
-          
-          if (product.unit) {
-            const supplierUnit = product.supplier_unit || '';
-            
-            newData.output.items[rowIndex].satuan_main = {
-              ...newData.output.items[rowIndex].satuan_main,
-              value: product.unit,
-              is_confident: true,
-              supplier_unit: supplierUnit // Store supplier unit in this field
-            };
-            
-            // Also update the satuan field with supplier unit if it exists
-            if (supplierUnit && newData.output.items[rowIndex].satuan) {
-              newData.output.items[rowIndex].satuan = {
-                ...newData.output.items[rowIndex].satuan,
-                value: supplierUnit,
-                is_confident: true
-              };
-            }
-          }
-          
-          // Use base_price (harga_pokok) instead of price for harga_dasar_main
-          if (product.base_price !== undefined || product.harga_pokok !== undefined) {
-            newData.output.items[rowIndex].harga_dasar_main = {
-              ...newData.output.items[rowIndex].harga_dasar_main,
-              value: parseFloat(product.base_price || product.harga_pokok),
-              is_confident: true
-            };
-          }
-        
-          // Set search status
-          setSearchStatus(prev => ({
-            ...prev,
-            [rowIndex]: 'found'
-          }));
-              } else {
-          // Need to search for product
-          setPendingSearches(prev => ({
-            ...prev,
-            [rowIndex]: value
-          }));
-          
-          // Mark as searching
-          setSearchStatus(prev => ({
-            ...prev,
-            [rowIndex]: 'searching'
-          }));
-          
-          // Call search function
-          searchProductByInvoiceCode(value, rowIndex);
-        }
-      }
-    }
-    
-    setEditableData(newData);
-    if (onDataChange) onDataChange(newData);
-  }, [editableData, onDataChange, productCache, searchProductByInvoiceCode]);
 
   // Handle effect for auto-searching products based on invoice codes
   useEffect(() => {
@@ -557,12 +1150,12 @@ export default function OCRResultsTable({ data, onDataChange }) {
       
       // Search for each item
       itemsToSearch.forEach(({ index, invoiceCode }) => {
-        searchProductByInvoiceCode(invoiceCode, index);
+        functionRefs.current.searchProductByInvoiceCode(invoiceCode, index);
       });
     }, 500); // Short delay to ensure component is ready
     
     return () => clearTimeout(timer);
-  }, [editableData, searchProductByInvoiceCode, searchStatus, processedInvoiceCodes, setPendingSearches, setSearchStatus]);
+  }, [editableData, functionRefs, searchStatus, processedInvoiceCodes, setPendingSearches, setSearchStatus]);
 
   // Add a separate useEffect to handle initial data load auto-search
   useEffect(() => {
@@ -890,48 +1483,51 @@ export default function OCRResultsTable({ data, onDataChange }) {
                   <tbody className="divide-y divide-gray-200">
                     {safeGet(editableData, 'output.nomor_referensi', { value: '', is_confident: false }) && (
                       <tr>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-gray-100 border-r border-gray-50">No Invoice:</td>
-                        <td className={`px-3 py-2 whitespace-nowrap text-sm text-gray-900 border-b border-gray-100 border-r border-gray-50 ${getCellBackgroundColor(safeGet(editableData, 'output.nomor_referensi', { value: '', is_confident: false })) || 'bg-white'}`}>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-r border-gray-50">No Invoice:</td>
+                        <td className={`px-3 py-2 whitespace-nowrap text-sm text-gray-900 border-b border-r border-gray-50 ${getCellBackgroundColor(safeGet(editableData, 'output.nomor_referensi', { value: '', is_confident: false })) || 'bg-white'}`}>
                           {renderEditableCell(safeGet(editableData, 'output.nomor_referensi', { value: '', is_confident: false }), (value) => handleHeaderChange('nomor_referensi', value))}
                         </td>
                       </tr>
                     )}
                     {safeGet(editableData, 'output.nama_supplier', { value: '', is_confident: false }) && (
                       <tr>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-gray-100 border-r border-gray-50">Supplier:</td>
-                        <td className={`px-3 py-2 whitespace-nowrap text-sm text-gray-900 border-b border-gray-100 border-r border-gray-50 ${getCellBackgroundColor(safeGet(editableData, 'output.nama_supplier', { value: '', is_confident: false })) || 'bg-white'}`}>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-r border-gray-50">Supplier:</td>
+                        <td className={`px-3 py-2 whitespace-nowrap text-sm text-gray-900 border-b border-r border-gray-50 ${getCellBackgroundColor(safeGet(editableData, 'output.nama_supplier', { value: '', is_confident: false })) || 'bg-white'}`}>
                           {renderEditableCell(safeGet(editableData, 'output.nama_supplier', { value: '', is_confident: false }), (value) => handleHeaderChange('nama_supplier', value))}
                         </td>
                       </tr>
                     )}
-                    {safeGet(editableData, 'output.tipe_dokumen', { value: '', is_confident: false }) && (
+                    {/* Conditionally render document type field */}
+                    {safeGet(editableData, 'output.tipe_dokumen', { value: '', is_confident: false }).value && (
                       <tr>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-gray-100 border-r border-gray-50">Tipe Dokumen:</td>
-                        <td className={`px-3 py-2 whitespace-nowrap text-sm text-gray-900 border-b border-gray-100 border-r border-gray-50 ${getCellBackgroundColor(safeGet(editableData, 'output.tipe_dokumen', { value: '', is_confident: false })) || 'bg-white'}`}>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-r border-gray-50">Tipe Dokumen:</td>
+                        <td className={`px-3 py-2 whitespace-nowrap text-sm text-gray-900 border-b border-r border-gray-50 ${getCellBackgroundColor(safeGet(editableData, 'output.tipe_dokumen', { value: '', is_confident: false })) || 'bg-white'}`}>
                           {renderEditableCell(safeGet(editableData, 'output.tipe_dokumen', { value: '', is_confident: false }), (value) => handleHeaderChange('tipe_dokumen', value))}
                         </td>
                       </tr>
                     )}
-                    {safeGet(editableData, 'output.tipe_pembayaran', { value: '', is_confident: false }) && (
+                    
+                    {/* Conditionally render payment type field */}
+                    {safeGet(editableData, 'output.tipe_pembayaran', { value: '', is_confident: false }).value && (
                       <tr>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-gray-100 border-r border-gray-50">Tipe Pembayaran:</td>
-                        <td className={`px-3 py-2 whitespace-nowrap text-sm text-gray-900 border-b border-gray-100 border-r border-gray-50 ${getCellBackgroundColor(safeGet(editableData, 'output.tipe_pembayaran', { value: '', is_confident: false })) || 'bg-white'}`}>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-r border-gray-50">Tipe Pembayaran:</td>
+                        <td className={`px-3 py-2 whitespace-nowrap text-sm text-gray-900 border-b border-r border-gray-50 ${getCellBackgroundColor(safeGet(editableData, 'output.tipe_pembayaran', { value: '', is_confident: false })) || 'bg-white'}`}>
                           {renderEditableCell(safeGet(editableData, 'output.tipe_pembayaran', { value: '', is_confident: false }), (value) => handleHeaderChange('tipe_pembayaran', value))}
                         </td>
                       </tr>
                     )}
                     {safeGet(editableData, 'output.salesman', { value: '', is_confident: false }) && (
                       <tr>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-gray-100 border-r border-gray-50">Salesman:</td>
-                        <td className={`px-3 py-2 whitespace-nowrap text-sm text-gray-900 border-b border-gray-100 border-r border-gray-50 ${getCellBackgroundColor(safeGet(editableData, 'output.salesman', { value: '', is_confident: false })) || 'bg-white'}`}>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-r border-gray-50">Salesman:</td>
+                        <td className={`px-3 py-2 whitespace-nowrap text-sm text-gray-900 border-b border-r border-gray-50 ${getCellBackgroundColor(safeGet(editableData, 'output.salesman', { value: '', is_confident: false })) || 'bg-white'}`}>
                           {renderEditableCell(safeGet(editableData, 'output.salesman', { value: '', is_confident: false }), (value) => handleHeaderChange('salesman', value))}
                         </td>
                       </tr>
                     )}
                     {safeGet(editableData, 'output.include_ppn', { value: '', is_confident: false }) && (
                       <tr>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-gray-100 border-r border-gray-50">Include PPN:</td>
-                        <td className={`px-3 py-2 whitespace-nowrap text-sm text-gray-900 border-b border-gray-100 border-r border-gray-50 ${getCellBackgroundColor(safeGet(editableData, 'output.include_ppn', { value: '', is_confident: false })) || 'bg-white'}`}>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-gray-100 border-r">Include PPN:</td>
+                        <td className={`px-3 py-2 whitespace-nowrap text-sm text-gray-900 border-b border-r border-gray-50 ${getCellBackgroundColor(safeGet(editableData, 'output.include_ppn', { value: '', is_confident: false })) || 'bg-white'}`}>
                           {renderBooleanField(
                             safeGet(editableData, 'output.include_ppn', { value: true, is_confident: true }),
                             (value) => handleIncludePPNChange(value)
@@ -941,8 +1537,8 @@ export default function OCRResultsTable({ data, onDataChange }) {
                     )}
                     {safeGet(editableData, 'output.ppn_rate', { value: '', is_confident: false }) && (
                       <tr>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-gray-100 border-r border-gray-50">PPN Rate:</td>
-                        <td className={`px-3 py-2 whitespace-nowrap text-sm text-gray-900 border-b border-gray-100 border-r border-gray-50 ${getCellBackgroundColor(safeGet(editableData, 'output.ppn_rate', { value: '', is_confident: false })) || 'bg-white'}`}>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-gray-100 border-r">PPN Rate:</td>
+                        <td className={`px-3 py-2 whitespace-nowrap text-sm text-gray-900 border-b border-gray-100 border-r ${getCellBackgroundColor(safeGet(editableData, 'output.ppn_rate', { value: '', is_confident: false })) || 'bg-white'}`}>
                           {renderEditableCell(safeGet(editableData, 'output.ppn_rate', { value: '', is_confident: false }), (value) => handleHeaderChange('ppn_rate', value))}
                           <span className="hidden">{JSON.stringify(safeGet(editableData, 'output.ppn_rate', { value: '', is_confident: false }))}</span>
                         </td>
@@ -950,8 +1546,8 @@ export default function OCRResultsTable({ data, onDataChange }) {
                     )}
                     {safeGet(editableData, 'output.margin_threshold', { value: '', is_confident: false }) && (
                       <tr>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-gray-100 border-r border-gray-50">Margin Threshold:</td>
-                        <td className={`px-3 py-2 whitespace-nowrap text-sm text-gray-900 border-b border-gray-100 border-r border-gray-50 ${getCellBackgroundColor(safeGet(editableData, 'output.margin_threshold', { value: '', is_confident: false })) || 'bg-white'}`}>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-gray-100 border-r">Margin Threshold:</td>
+                        <td className={`px-3 py-2 whitespace-nowrap text-sm text-gray-900 border-b border-gray-100 border-r ${getCellBackgroundColor(safeGet(editableData, 'output.margin_threshold', { value: '', is_confident: false })) || 'bg-white'}`}>
                           {renderEditableCell(safeGet(editableData, 'output.margin_threshold', { value: '', is_confident: false }), (value) => handleHeaderChange('margin_threshold', value))}
                           <span className="hidden">{JSON.stringify(safeGet(editableData, 'output.margin_threshold', { value: '', is_confident: false }))}</span>
                         </td>
@@ -991,7 +1587,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
                     {columns.map((column, index) => (
                       <th 
                         key={index} 
-                        className={`px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-gray-200 border-r border-gray-50 relative ${column.sticky ? 'sticky z-10' : ''}`}
+                        className={`px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-gray-200 border-r relative ${column.sticky ? 'sticky z-10' : ''}`}
                         style={{ 
                           width: `${columnWidths[column.id]}px`,
                           ...(column.sticky ? { left: `${column.left}px`, backgroundColor: '#f9fafb' } : {})
@@ -1042,20 +1638,20 @@ export default function OCRResultsTable({ data, onDataChange }) {
                 <table className="min-w-full divide-y divide-gray-200">
                   <tbody className="divide-y divide-gray-200">
                     <tr>
-                      <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-gray-100 border-r border-gray-50">Total Harga Bruto:</td>
-                      <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right border-b border-gray-100 border-r border-gray-50 bg-white">
+                      <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-r border-gray-50">Total Harga Bruto:</td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right border-b border-r border-gray-50 bg-white">
                         {formatCurrency(safeGet(editableData, 'output.items', []).reduce((sum, item) => sum + parseNumber(safeGet(item, 'harga_bruto.value', 0)), 0))}
                       </td>
                     </tr>
                     <tr>
-                      <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-gray-100 border-r border-gray-50">Total Diskon Rp:</td>
-                      <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right border-b border-gray-100 border-r border-gray-50 bg-white">
+                      <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-r border-gray-50">Total Diskon Rp:</td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right border-b border-r border-gray-50 bg-white">
                         {formatCurrency(safeGet(editableData, 'output.items', []).reduce((sum, item) => sum + parseNumber(safeGet(item, 'diskon_rp.value', 0)), 0))}
                       </td>
                     </tr>
                     <tr>
-                      <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-gray-100 border-r border-gray-50">Total Jumlah Netto:</td>
-                      <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right border-b border-gray-100 border-r border-gray-50 bg-white">
+                      <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-r border-gray-50">Total Jumlah Netto:</td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right border-b border-r border-gray-50 bg-white">
                         {formatCurrency(safeGet(editableData, 'output.items', []).reduce((sum, item) => sum + parseNumber(safeGet(item, 'jumlah_netto.value', 0)), 0))}
                       </td>
                     </tr>
@@ -1066,23 +1662,27 @@ export default function OCRResultsTable({ data, onDataChange }) {
                 <table className="min-w-full divide-y divide-gray-200">
                   <tbody className="divide-y divide-gray-200">
                     <tr>
-                      <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-gray-100 border-r border-gray-50">Total PPN:</td>
-                      <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right border-b border-gray-100 border-r border-gray-50 bg-white">
+                      <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b  border-r border-gray-50">Total PPN:</td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right border-b  border-r border-gray-50 bg-white">
                         {formatCurrency(safeGet(editableData, 'output.items', []).reduce((sum, item) => sum + parseNumber(safeGet(item, 'ppn.value', 0)), 0))}
                       </td>
                     </tr>
                     <tr>
-                      <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-gray-100 border-r border-gray-50">Total Include PPN:</td>
-                      <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right border-b border-gray-100 border-r border-gray-50 bg-white font-bold">
+                      <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-r border-gray-50">
+                        {safeGet(editableData, 'output.include_ppn.value', false) ? 'Total (PPN Termasuk):' : 'Total (PPN Ditambahkan):'}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right border-b border-r border-gray-50 bg-white font-bold">
                         {formatCurrency(
-                          safeGet(editableData, 'output.items', []).reduce((sum, item) => 
+                          safeGet(editableData, 'output.include_ppn.value', false)
+                            ? safeGet(editableData, 'output.items', []).reduce((sum, item) => sum + parseNumber(safeGet(item, 'jumlah_netto.value', 0)), 0)
+                            : safeGet(editableData, 'output.items', []).reduce((sum, item) => 
                             sum + parseNumber(safeGet(item, 'jumlah_netto.value', 0)) + parseNumber(safeGet(item, 'ppn.value', 0)), 0)
                         )}
                       </td>
                     </tr>
                     <tr>
-                      <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b border-gray-100 border-r border-gray-50">Total Margin Rp:</td>
-                      <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right border-b border-gray-100 border-r border-gray-50 bg-white">
+                      <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 bg-white border-b  border-r border-gray-50">Total Margin Rp:</td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right border-b  border-r border-gray-50 bg-white">
                         {formatCurrency(safeGet(editableData, 'output.items', []).reduce((sum, item) => sum + parseNumber(safeGet(item, 'margin_rp.value', 0)), 0))}
                       </td>
                     </tr>
@@ -1251,7 +1851,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
             return (
               <td 
                 key={colIndex} 
-                className={`px-3 py-3 whitespace-nowrap text-sm text-gray-900 border-b border-gray-100 border-r border-gray-50 ${column.sticky ? 'sticky z-10' : ''}`}
+                className={`px-3 py-3 whitespace-nowrap text-sm text-gray-900 border-b  border-r border-gray-50 ${column.sticky ? 'sticky z-10' : ''}`}
                 style={{ 
                   width: `${columnWidths[column.id]}px`,
                   ...(column.sticky ? { left: `${column.left}px`, backgroundColor: 'white' } : {})
@@ -1277,7 +1877,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
             return (
               <td 
                 key={colIndex} 
-                className={`px-3 py-3 whitespace-nowrap text-sm text-gray-900 text-right border-b border-gray-100 border-r border-gray-50 ${column.sticky ? 'sticky z-10' : ''}`}
+                className={`px-3 py-3 whitespace-nowrap text-sm text-gray-900 text-right border-b  border-r border-gray-50 ${column.sticky ? 'sticky z-10' : ''}`}
                 style={{ 
                   width: `${columnWidths[column.id]}px`,
                   backgroundColor: '#ecfdf5',
@@ -1294,7 +1894,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
             return (
               <td 
                 key={colIndex} 
-                className={`px-3 py-3 whitespace-nowrap text-sm text-gray-900 text-right border-b border-gray-100 border-r border-gray-50 ${column.sticky ? 'sticky z-10' : ''}`}
+                className={`px-3 py-3 whitespace-nowrap text-sm text-gray-900 text-right border-b  border-r border-gray-50 ${column.sticky ? 'sticky z-10' : ''}`}
                 style={{ 
                   width: `${columnWidths[column.id]}px`,
                   backgroundColor: '#d1fae5',
@@ -1323,7 +1923,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
           return (
             <td 
               key={colIndex} 
-              className={`${cellClass} border-b border-gray-100 border-r border-gray-50`}
+              className={`${cellClass} border-b  border-r border-gray-50`}
               style={{ 
                 width: `${columnWidths[column.id]}px`,
                 backgroundColor: bgColorMap[cellBgColor] || 'white',
@@ -1347,47 +1947,85 @@ export default function OCRResultsTable({ data, onDataChange }) {
 
   // Update the renderEditableCell function to display the correct placeholder
   const renderEditableCell = (item, onChange, type = 'text', rowIndex, columnId, handleProductCellClick) => {
-    if (!item) return null;
+    // Get the cell data
+    const cellData = item[columnId];
 
-    const cellClass = getCellBackgroundColor(item);
+    // Early return for undefined cell data
+    if (!cellData) {
+      return null;
+    }
 
-    // Special handling for product search cells
+    // Handle special cell types
     if (columnId === 'kode_barang_main' || columnId === 'nama_barang_main') {
-      // Determine if this cell needs manual search
-      const needsManualSearch = searchStatus[rowIndex] === 'not_found' || searchStatus[rowIndex] === 'error';
-      const isSearching = searchStatus[rowIndex] === 'searching';
-      const isEmpty = !item.value || item.value === '';
+      // Product search cell - custom handling with search popup
+      const cellValue = safeGet(cellData, 'value', '');
+      const isConfident = safeGet(cellData, 'is_confident', true) !== false;
+      const searchState = searchStatus[rowIndex] || 'idle';
+      const disabled = searchState === 'loading';
+      
+      let backgroundColor = 'bg-white';
+      if (!isConfident) {
+        backgroundColor = 'bg-orange-50';
+      }
+      if (!cellValue) {
+        backgroundColor = 'bg-red-50';
+      }
       
       return (
         <div 
-          id={`cell-${columnId}-${rowIndex}`}
-          className={`w-full cursor-pointer ${isEmpty ? 'text-gray-400 italic' : ''}`}
-          onClick={() => handleProductCellClick(columnId, rowIndex)}
+          className={`w-full h-full min-h-[38px] flex items-center rounded-md border border-gray-300 text-gray-800 px-3 cursor-pointer ${backgroundColor}`}
+          onClick={() => {
+            // Handle product search cell click
+            if (handleProductCellClick && !disabled) {
+              handleProductCellClick(rowIndex);
+            }
+          }}
         >
-          {isSearching ? (
-            <div className="flex items-center justify-center space-x-1">
-              <div className="animate-spin h-4 w-4 border-2 border-blue-500 rounded-full border-t-transparent"></div>
-              <span>Searching...</span>
+          {searchState === 'loading' ? (
+            <div className="animate-pulse flex items-center">
+              <div className="w-full bg-gray-200 h-4 rounded"></div>
             </div>
-          ) : isEmpty ? (
-            needsManualSearch ? "tidak ditemukan, cari..." : "Click to search"
           ) : (
-            item.value
+            <span className="truncate">{cellValue}</span>
           )}
         </div>
       );
-    }
-    
-    // Special handling for unit selection dropdown if available_units exists
-    if (columnId === 'satuan_main' && item.available_units && item.available_units.length > 0) {
+    } else if (columnId === 'satuan_main') {
+      // Unit select field - render as dropdown
+      const value = safeGet(cellData, 'value', '');
+      const availableUnits = safeGet(cellData, 'available_units', []);
+      const isConfident = safeGet(cellData, 'is_confident', true) !== false;
+      
+      let backgroundColor = 'bg-white';
+      if (!isConfident) {
+        backgroundColor = 'bg-orange-50';
+      }
+      if (!value) {
+        backgroundColor = 'bg-red-50';
+      }
+      
+      console.log(`OCRResultsTable: Rendering unit dropdown for row ${rowIndex}:`, {
+        value,
+        availableUnits,
+        cellData
+      });
+      
       return (
         <select 
-          className={`w-full py-1 px-2 border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 ${cellClass}`}
-          value={item.value || ''}
-          onChange={(e) => handleUnitChange(rowIndex, e.target.value)}
+          value={value}
+          onChange={(e) => {
+            // Handle unit change special handler
+            if (handleUnitChange) {
+              handleUnitChange(rowIndex, e.target.value);
+            } else {
+              onChange(e.target.value);
+            }
+          }}
+          className={`w-full rounded-md border border-gray-300 text-gray-800 px-3 py-2 ${backgroundColor}`}
         >
-          {item.available_units.map((unit, idx) => (
-            <option key={`unit-${idx}`} value={unit}>
+          {!value && <option value="">Select Unit</option>}
+          {availableUnits.map((unit, index) => (
+            <option key={`unit-${index}-${unit}`} value={unit}>
               {unit}
             </option>
           ))}
@@ -1395,67 +2033,8 @@ export default function OCRResultsTable({ data, onDataChange }) {
       );
     }
     
-    // Handle different field types based on the type parameter
-    switch (type) {
-      case 'date':
-        return renderDatePicker(item, (date) => onChange(date));
-      
-      case 'boolean':
-        return renderBooleanField(
-          item,
-          (value) => {
-            if (columnId === 'bkp') {
-              handleBKPChange(rowIndex, value);
-            } else {
-              onChange(value);
-            }
-          }
-        );
-        
-      case 'currency':
-        return (
-          <input
-            type="text"
-            value={item.value !== null && item.value !== undefined ? formatCurrency(item.value) : ''}
-            onChange={(e) => {
-              const val = parseNumber(e.target.value);
-              onChange(val);
-            }}
-            className={`w-full bg-transparent border-none p-0 focus:ring-0 focus:outline-none text-right ${cellClass}`}
-          />
-        );
-        
-      case 'percentage':
-        return (
-          <input
-            type="text"
-            value={typeof item.value === 'number' ? item.value.toString().replace('.', ',') : (item.value || '')}
-            onChange={(e) => {
-              // Allow only numbers and one comma as decimal separator
-              let val = e.target.value.replace(/[^0-9,]/g, '');
-              // Ensure only one comma
-              const parts = val.split(',');
-              if (parts.length > 2) {
-                val = `${parts[0]},${parts.slice(1).join('')}`;
-              }
-              // Convert to number format (replace comma with dot for JS number)
-              const numericValue = val ? parseFloat(val.replace(',', '.')) : 0;
-              onChange(isNaN(numericValue) ? 0 : numericValue);
-            }}
-            className={`w-full bg-transparent border-none p-0 focus:ring-0 focus:outline-none text-right ${cellClass}`}
-          />
-        );
-        
-      default:
-        return (
-          <input
-            type="text"
-            value={item.value !== undefined && item.value !== null ? item.value : ''}
-            onChange={(e) => onChange(e.target.value)}
-            className={`w-full bg-transparent border-none p-0 focus:ring-0 focus:outline-none ${cellClass}`}
-          />
-        );
-    }
+    // Default rendering for other cell types...
+    // ...
   };
 
   // Define column definitions
@@ -1621,35 +2200,23 @@ export default function OCRResultsTable({ data, onDataChange }) {
 
   // Handle unit change and update related prices
   const handleUnitChange = useCallback((rowIndex, newUnit) => {
-    console.log(`OCRResultsTable: Received unit change for row ${rowIndex} to ${newUnit}`);
-    
     // Create a deep copy to avoid mutation issues
     const newData = JSON.parse(JSON.stringify(editableData));
     
     // Validate data structure
     if (!newData?.output?.items || !Array.isArray(newData.output.items)) {
-      console.error(`OCRResultsTable: Invalid data structure for unit change`);
-      console.log('Data structure:', newData);
       return;
     }
     
     // Validate row index
     if (rowIndex < 0 || rowIndex >= newData.output.items.length) {
-      console.error(`OCRResultsTable: Row index ${rowIndex} is out of bounds (items length: ${newData.output.items.length})`);
       return;
     }
     
     const item = newData.output.items[rowIndex];
     if (!item) {
-      console.error(`OCRResultsTable: Item not found at row ${rowIndex} even though index is within bounds`);
       return;
     }
-    
-    // Log detailed debug info
-    console.log(`OCRResultsTable: Processing unit change for row ${rowIndex}:`, {
-      newUnit,
-      item: JSON.stringify(item, null, 2)
-    });
     
     if ('satuan_main' in item) {
       // Store the previous unit
@@ -1665,22 +2232,10 @@ export default function OCRResultsTable({ data, onDataChange }) {
       // If we have a mapping of supplier units, get the one for the new unit
       if (item.satuan_main.supplier_units && typeof item.satuan_main.supplier_units === 'object') {
         supplierUnit = item.satuan_main.supplier_units[newUnit] || '';
-        console.log(`OCRResultsTable: Found supplier unit mapping for ${newUnit}: ${supplierUnit}`);
-      }
-      
-      console.log(`OCRResultsTable: Available units (${availableUnits.length}):`, availableUnits);
-      console.log(`OCRResultsTable: Unit prices available:`, unitPrices);
-      console.log(`OCRResultsTable: Supplier unit for ${newUnit}: ${supplierUnit}`);
-      
-      // Log each unit price for clarity
-      for (const unit in unitPrices) {
-        console.log(`OCRResultsTable: Unit [${unit}] price: ${unitPrices[unit]}`);
       }
       
       // Only update if the unit is actually changing
       if (prevUnit !== newUnit) {
-        console.log(`OCRResultsTable: Changing unit from [${prevUnit}] to [${newUnit}]`);
-        
         // Update the unit value, preserving supplier_unit information
         item.satuan_main = {
           ...item.satuan_main,
@@ -1695,9 +2250,6 @@ export default function OCRResultsTable({ data, onDataChange }) {
           if (newUnit in unitPrices) {
             const newBasePrice = parseFloat(unitPrices[newUnit]) || 0;
             const oldBasePrice = parseFloat(item.harga_dasar_main.value) || 0;
-            
-            console.log(`OCRResultsTable: Found specific price ${newBasePrice} for unit [${newUnit}]`);
-            console.log(`OCRResultsTable: Updating base price from ${oldBasePrice} to ${newBasePrice}`);
             
             // Update the base price
             item.harga_dasar_main = {
@@ -1725,18 +2277,13 @@ export default function OCRResultsTable({ data, onDataChange }) {
                   value: marginRp,
                   is_confident: true
                 };
-                
-                console.log(`OCRResultsTable: Updated margins - ${marginPersen.toFixed(2)}% (${marginRp.toFixed(2)} Rp)`);
               }
             }
           } else {
-            console.log(`OCRResultsTable: No price found for unit [${newUnit}] in unitPrices`);
-            
             // Use fallback price if available
             if (Object.keys(unitPrices).length > 0) {
               const firstUnit = Object.keys(unitPrices)[0];
               const fallbackPrice = parseFloat(unitPrices[firstUnit]) || 0;
-              console.log(`OCRResultsTable: Using fallback price ${fallbackPrice} from unit [${firstUnit}]`);
               
               // Update with fallback price
               item.harga_dasar_main = {
@@ -1755,11 +2302,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
         if (onDataChange) {
           onDataChange(newData);
         }
-      } else {
-        console.log(`OCRResultsTable: Unit not changed (same as previous: ${prevUnit})`);
       }
-    } else {
-      console.warn(`OCRResultsTable: satuan_main field not found in item at row ${rowIndex}`);
     }
   }, [editableData, onDataChange]);
 
@@ -1778,7 +2321,6 @@ export default function OCRResultsTable({ data, onDataChange }) {
           left: tableContainer.scrollLeft,
           top: tableContainer.scrollTop
         };
-        console.log('Saved scroll position:', tableScrollPosRef.current);
       }
     };
     
@@ -1805,7 +2347,6 @@ export default function OCRResultsTable({ data, onDataChange }) {
       if (tableContainer) {
         tableContainer.scrollLeft = tableScrollPosRef.current.left;
         tableContainer.scrollTop = tableScrollPosRef.current.top;
-        console.log('Restored scroll position:', tableScrollPosRef.current);
       }
     }, 100);
     
@@ -1830,6 +2371,349 @@ export default function OCRResultsTable({ data, onDataChange }) {
     };
   }, [dropdownOpen]);
 
+  // --- Handlers for ItemsTable Add/Delete ---
+  const handleAddItem = () => {
+    console.log("OCRResultsTable: handleAddItem called");
+    const newData = JSON.parse(JSON.stringify(editableData)); // Deep copy
+    if (!newData.output) newData.output = { items: [] }; // Ensure output and items exist
+    if (!newData.output.items) newData.output.items = [];
+
+    const newItem = {
+      id: `new_${Date.now()}`,
+      kode_barang_invoice: { value: '', is_confident: true },
+      nama_barang_invoice: { value: '', is_confident: true },
+      qty: { value: 0, is_confident: true },
+      satuan: { value: '', is_confident: true },
+      harga_satuan: { value: 0, is_confident: true },
+      harga_bruto: { value: 0, is_confident: true },
+      diskon_persen: { value: 0, is_confident: true },
+      diskon_rp: { value: 0, is_confident: true },
+      jumlah_netto: { value: 0, is_confident: true },
+      bkp: { value: true, is_confident: true }, // Default BKP to true
+      ppn: { value: 0, is_confident: true },
+      // Add default database-related fields expected by ItemsTable
+      kode_barang_main: { value: "", is_confident: true, from_database: true },
+      nama_barang_main: { value: "", is_confident: true, from_database: true },
+      satuan_main: { value: "", is_confident: true, from_database: true, available_units: [], unit_prices: {}, supplier_unit: '' }, // Ensure structure
+      harga_jual_main: { value: 0, is_confident: true, from_database: true },
+      harga_dasar_main: { value: 0, is_confident: true, from_database: true },
+      margin_persen: { value: 0, is_confident: true, from_database: true },
+      margin_rp: { value: 0, is_confident: true, from_database: true },
+      kenaikan_persen: { value: 0, is_confident: true, from_database: true },
+      kenaikan_rp: { value: 0, is_confident: true, from_database: true },
+      perbedaan_persen: { value: 0, is_confident: true }, // Add calculated fields if needed by table
+      perbedaan_rp: { value: 0, is_confident: true },
+    };
+
+    newData.output.items.push(newItem);
+
+    setEditableData(newData);
+    if (onDataChange) {
+      console.log("OCRResultsTable: Calling onDataChange after add");
+      onDataChange(newData);
+    }
+  };
+
+  const handleDeleteItem = (index) => {
+    console.log(`OCRResultsTable: handleDeleteItem called for index ${index}`);
+    const newData = JSON.parse(JSON.stringify(editableData)); // Deep copy
+    if (!newData.output || !newData.output.items || index < 0 || index >= newData.output.items.length) {
+      console.warn(`OCRResultsTable: Invalid index (${index}) or items array for delete.`);
+      return; // Safety check
+    }
+
+    newData.output.items.splice(index, 1); // Remove item at index
+
+    setEditableData(newData);
+    if (onDataChange) {
+      console.log("OCRResultsTable: Calling onDataChange after delete");
+      onDataChange(newData);
+    }
+  };
+
+  // Add a direct product lookup function that doesn't rely on refs
+  const directProductLookup = async (invoiceCode, itemIndex) => {
+    console.log(`OCRResultsTable: Direct lookup for code ${invoiceCode} for item ${itemIndex}`);
+    
+    if (!invoiceCode) {
+      console.warn(`OCRResultsTable: Empty invoice code for direct lookup`);
+      return;
+    }
+    
+    // Update search status
+    setSearchStatus(prev => ({
+      ...prev,
+      [itemIndex]: 'loading'
+    }));
+    
+    try {
+      // Get the current item to check its supplier unit
+      const currentItem = editableData?.output?.items?.[itemIndex] || {};
+      const supplierUnitValue = safeGet(currentItem, 'satuan.value', '').trim();
+      const invoicePrice = parseFloat(safeGet(currentItem, 'harga_satuan.value', '0')) || 0;
+      
+      console.log(`OCRResultsTable: Item ${itemIndex} structure:`, {
+        supplierUnit: supplierUnitValue,
+        invoicePrice: invoicePrice
+      });
+      
+      // Search by supplier code using direct API call
+      console.log(`OCRResultsTable: Calling productItemApi.getProductBySupplierCode with code ${invoiceCode}`);
+      const response = await productItemApi.getProductBySupplierCode(invoiceCode);
+      console.log(`OCRResultsTable: Raw API response:`, response);
+      
+      // Handle different response formats
+      let product = null;
+      if (response && response.success === true && response.data) {
+        // New API format: { success: true, data: {...} }
+        product = response.data;
+        console.log(`OCRResultsTable: Found product in response.data:`, product);
+      } else if (response && response.ID_Produk) {
+        // Direct product object format
+        product = response;
+        console.log(`OCRResultsTable: Found product object:`, product);
+      } else if (response && Array.isArray(response) && response.length > 0) {
+        // Array response format
+        product = response[0];
+        console.log(`OCRResultsTable: Found product in array response:`, product);
+      }
+      
+      if (!product) {
+        console.warn(`OCRResultsTable: No product found for ${invoiceCode}`);
+        setSearchStatus(prev => ({
+          ...prev,
+          [itemIndex]: 'notfound'
+        }));
+        return;
+      }
+      
+      console.log(`OCRResultsTable: Product found:`, product);
+      
+      // Update the product cache
+      setProductCache(prev => ({
+        ...prev,
+        [invoiceCode]: product
+      }));
+      
+      // Update the product data directly
+      setEditableData(prevData => {
+        // Safety check
+        if (!prevData?.output?.items || !prevData.output.items[itemIndex]) {
+          return prevData;
+        }
+        
+        // Clone the data
+        const newData = { ...prevData };
+        const items = [...newData.output.items];
+        const item = { ...items[itemIndex] };
+        
+        // Update the product data fields
+        console.log(`OCRResultsTable: Updating item with product data:`, {
+          kode: product.Kode_Item,
+          nama: product.Nama_Item
+        });
+        
+        // Update main code and name
+        item.kode_barang_main = {
+          value: product.Kode_Item || '',
+          is_confident: true
+        };
+        
+        item.nama_barang_main = {
+          value: product.Nama_Item || '',
+          is_confident: true
+        };
+        
+        // Process units if available (handle both uppercase 'Units' and lowercase 'units')
+        const productUnits = product.Units || product.units || [];
+        
+        if (Array.isArray(productUnits) && productUnits.length > 0) {
+          console.log(`OCRResultsTable: Available units:`, productUnits);
+          
+          // Extract the array of available unit names for the dropdown
+          const availableUnits = productUnits.map(u => u.Nama_Satuan);
+          console.log(`OCRResultsTable: Available unit names for dropdown:`, availableUnits);
+          
+          // Find base unit for reference
+          const baseUnit = productUnits.find(u => u.Is_Base === 1) || productUnits[0];
+          
+          // Try to find matching unit by supplier code
+          let matchingUnit = null;
+          let matchReason = '';
+          
+          // Priority 1: Find direct match with supplier unit
+          if (supplierUnitValue) {
+            matchingUnit = productUnits.find(unit => {
+              const normalizedSupplierUnit = supplierUnitValue.toLowerCase().trim();
+              const normalizedUnitSupplier = (unit.Satuan_Supplier || '').toLowerCase().trim();
+              return normalizedUnitSupplier && normalizedUnitSupplier === normalizedSupplierUnit;
+            });
+            
+            if (matchingUnit) {
+              matchReason = 'exact supplier unit match';
+              console.log(`OCRResultsTable: Found exact supplier unit match: ${matchingUnit.Satuan_Supplier} → ${matchingUnit.Nama_Satuan}`);
+            }
+          }
+          
+          // Priority 2: If no direct match, try fuzzy match
+          if (!matchingUnit && supplierUnitValue) {
+            matchingUnit = productUnits.find(unit => {
+              if (!unit.Satuan_Supplier) return false;
+              
+              const normalizedSupplierUnit = supplierUnitValue.toLowerCase().trim();
+              const normalizedUnitSupplier = unit.Satuan_Supplier.toLowerCase().trim();
+              
+              return normalizedUnitSupplier.includes(normalizedSupplierUnit) || 
+                    normalizedSupplierUnit.includes(normalizedUnitSupplier);
+            });
+            
+            if (matchingUnit) {
+              matchReason = 'fuzzy supplier unit match';
+              console.log(`OCRResultsTable: Found fuzzy supplier unit match: ${matchingUnit.Satuan_Supplier} → ${matchingUnit.Nama_Satuan}`);
+            }
+          }
+          
+          // Fallback to base unit if no match found
+          if (!matchingUnit) {
+            matchingUnit = baseUnit;
+            matchReason = 'fallback to base unit';
+            console.log(`OCRResultsTable: No matching unit found, using base unit: ${baseUnit.Nama_Satuan}`);
+          }
+          
+          // Build the unit prices mapping for calculations
+          const unitPrices = {};
+          
+          // Check both formats for prices: standalone Prices array or nested inside units
+          if (product.Prices && Array.isArray(product.Prices)) {
+            product.Prices.forEach(price => {
+              unitPrices[price.Nama_Satuan] = parseFloat(price.Harga_Pokok || 0);
+            });
+          } else {
+            // Look for prices inside unit objects
+            productUnits.forEach(unit => {
+              if (unit.prices && Array.isArray(unit.prices) && unit.prices.length > 0) {
+                unitPrices[unit.Nama_Satuan] = parseFloat(unit.prices[0].Harga_Pokok || 0);
+              }
+            });
+          }
+          
+          // Build supplier unit mapping in the exact format that ItemsTable expects
+          // This is crucial! ItemsTable expects: { mainUnit: supplierUnit, ... }
+          const supplierUnits = {};
+          productUnits.forEach(unit => {
+            if (unit.Satuan_Supplier) {
+              supplierUnits[unit.Nama_Satuan] = unit.Satuan_Supplier;
+            }
+          });
+          
+          console.log(`OCRResultsTable: Unit mapping for ItemsTable:`, supplierUnits);
+          
+          // Update the satuan_main field with all necessary data for the dropdown
+          item.satuan_main = {
+            value: matchingUnit.Nama_Satuan,
+            is_confident: true,
+            available_units: availableUnits,
+            supplier_unit: supplierUnitValue,
+            supplier_units: supplierUnits,
+            unit_prices: unitPrices,
+            matchReason: matchReason
+          };
+          
+          console.log(`OCRResultsTable: Set satuan_main for dropdown:`, item.satuan_main);
+          
+          // Set the base price if available for this unit
+          const selectedUnit = matchingUnit.Nama_Satuan;
+          if (unitPrices[selectedUnit]) {
+            item.harga_dasar_main = {
+              value: unitPrices[selectedUnit].toString(),
+              is_confident: true
+            };
+          }
+        }
+        
+        // Update the item in the array
+        items[itemIndex] = item;
+        newData.output.items = items;
+        
+        // Call onDataChange if provided
+        if (onDataChange) {
+          onDataChange(newData);
+        }
+        
+        return newData;
+      });
+      
+      // Update search status to found
+      setSearchStatus(prev => ({
+        ...prev,
+        [itemIndex]: 'found'
+      }));
+      
+    } catch (error) {
+      console.error(`OCRResultsTable: Error in direct product lookup for ${invoiceCode}:`, error);
+      setSearchStatus(prev => ({
+        ...prev,
+        [itemIndex]: 'error'
+      }));
+    }
+  };
+  
+  // Add direct effect for product lookup when data changes
+  useEffect(() => {
+    // Skip if no data or items
+    if (!editableData?.output?.items || editableData.output.items.length === 0) {
+      return;
+    }
+    
+    console.log('OCRResultsTable: Running direct product lookup for items');
+    console.log('OCRResultsTable: Total items:', editableData.output.items.length);
+    
+    // Process items with invoice codes
+    const timer = setTimeout(() => {
+      // Log all items and their code fields for debugging
+      editableData.output.items.forEach((item, index) => {
+        console.log(`OCRResultsTable: Item ${index} code fields:`, {
+          kode_barang_invoice: safeGet(item, 'kode_barang_invoice.value', ''),
+          kode_barang: safeGet(item, 'kode_barang.value', ''),
+          nama_barang_invoice: safeGet(item, 'nama_barang_invoice.value', ''),
+          kode_main: safeGet(item, 'kode_barang_main.value', '')
+        });
+      });
+      
+      // Check all items for codes to process
+      editableData.output.items.forEach((item, index) => {
+        // Check ALL possible invoice code field names
+        const invoiceCode = 
+          safeGet(item, 'kode_barang_invoice.value', '') || 
+          safeGet(item, 'kode_barang.value', '') ||
+          safeGet(item, 'supplier_code.value', '') ||
+          safeGet(item, 'invoice_code.value', '');
+        
+        // Skip if no invoice code or already has main code
+        const hasMainCode = !!safeGet(item, 'kode_barang_main.value', '');
+        
+        if (!invoiceCode) {
+          console.log(`OCRResultsTable: Item ${index} - No invoice code found, skipping lookup`);
+          return;
+        }
+        
+        if (hasMainCode) {
+          console.log(`OCRResultsTable: Item ${index} - Already has main code, skipping lookup`);
+          return;
+        }
+        
+        console.log(`OCRResultsTable: Will look up item ${index} with code ${invoiceCode}`);
+        
+        // Use setTimeout to stagger lookups
+        setTimeout(() => {
+          directProductLookup(invoiceCode, index);
+        }, index * 500); // Increase timeout to 500ms between items
+      });
+    }, 1500); // Increase initial delay to 1.5 seconds
+    
+    return () => clearTimeout(timer);
+  }, [editableData?.output?.items?.length]);
+
   if (!editableData) {
     return null;
   }
@@ -1844,7 +2728,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
         handleIncludePPNChange={handleIncludePPNChange}
       />
 
-      {/* Items Table */}
+      {/* Items Table - Pass new handlers */}
       <ItemsTable
         editableData={editableData}
         handleItemChange={handleItemChange}
@@ -1852,6 +2736,9 @@ export default function OCRResultsTable({ data, onDataChange }) {
         handleProductCellClick={handleProductCellClick}
         handleUnitChange={handleUnitChange}
         handleBKPChange={handleBKPChange}
+        // Pass the new handlers
+        onAddItem={handleAddItem} 
+        onDeleteItem={handleDeleteItem}
       />
       
       {/* Totals Section */}
@@ -1879,4 +2766,3 @@ export default function OCRResultsTable({ data, onDataChange }) {
     </div>
   );
 }
-

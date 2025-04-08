@@ -13,21 +13,21 @@ const Product = sequelize.define('Product', {
     allowNull: false
   },
   product_code: {
-    type: DataTypes.STRING,
+    type: DataTypes.STRING(50),
     unique: true,
     allowNull: false,
     index: true
   },
   product_name: {
-    type: DataTypes.STRING,
+    type: DataTypes.STRING(255),
     allowNull: false
   },
   category: {
-    type: DataTypes.STRING,
+    type: DataTypes.STRING(100),
     allowNull: true
   },
   unit: {
-    type: DataTypes.STRING,
+    type: DataTypes.STRING(100),
     allowNull: false
   },
   price: {
@@ -40,11 +40,11 @@ const Product = sequelize.define('Product', {
     defaultValue: 0
   },
   supplier_code: {
-    type: DataTypes.STRING,
+    type: DataTypes.STRING(100),
     allowNull: true
   },
   barcode: {
-    type: DataTypes.STRING,
+    type: DataTypes.STRING(100),
     allowNull: true
   },
   min_stock: {

@@ -160,97 +160,127 @@ const ProductSearchDropdown = memo(({
     
     if (index >= 0 && editableData?.output?.items) {
       const newEditableData = { ...editableData };
+      const item = newEditableData.output.items[index];
       
       // Update kode_barang_main if it exists
-      if ('kode_barang_main' in newEditableData.output.items[index]) {
-        newEditableData.output.items[index].kode_barang_main = {
-          ...newEditableData.output.items[index].kode_barang_main,
+      if ('kode_barang_main' in item) {
+        item.kode_barang_main = {
+          ...item.kode_barang_main,
           value: product.product_code,
           is_confident: true
         };
       }
       
       // Update nama_barang_main if it exists
-      if ('nama_barang_main' in newEditableData.output.items[index]) {
-        newEditableData.output.items[index].nama_barang_main = {
-          ...newEditableData.output.items[index].nama_barang_main,
+      if ('nama_barang_main' in item) {
+        item.nama_barang_main = {
+          ...item.nama_barang_main,
           value: product.product_name,
           is_confident: true
         };
       }
       
-      // Update satuan_main if it exists
-      if ('satuan_main' in newEditableData.output.items[index]) {
-        const productUnit = product.units && product.units.length > 0 ? 
-          product.units[0] : product.unit || '';
-          
-        // Get the unit prices from the product data
-        let unitPrices = {};
+      // Determine supplier unit and unit information
+      let supplierUnit = '';
+      if (product.supplier_unit && typeof product.supplier_unit === 'string') {
+        supplierUnit = product.supplier_unit;
+      } else if (product.satuan_supplier) {
+        supplierUnit = product.satuan_supplier;
+      } else if (product.supplier_unit && typeof product.supplier_unit === 'object') {
+        // If supplier_unit is a mapping object, we'll use it later when selecting the unit
+        supplierUnit = ''; // Will be set based on selected unit
+      }
+      
+      // Get all available units for the product
+      const availableUnits = product.units && product.units.length > 0 ? 
+        product.units : [product.unit].filter(Boolean);
+      
+      // Get the unit prices from the product data
+      let unitPrices = {};
+      if (product.units_price) {
+        unitPrices = product.units_price;
+      } else if (product.unit_prices) {
+        unitPrices = product.unit_prices;
+      } else {
+        // Create a fallback mapping with the same price for all units
+        const basePrice = parseFloat(product.base_price) || 0;
+        availableUnits.forEach(unit => {
+          unitPrices[unit] = basePrice;
+        });
+      }
+      
+      // Determine the best unit to use based on the available information
+      let unitToUse = '';
+      let userSupplierUnit = '';
+      
+      // First priority: Check if the item already has a satuan (supplier unit) field
+      if (item.satuan && item.satuan.value) {
+        userSupplierUnit = item.satuan.value;
         
-        if (product.units_price) {
-          // Alternative property name that might be used
-          unitPrices = product.units_price;
-        } else if (product.unit_prices) {
-          // Direct unit_prices mapping from backend (most explicit)
-          unitPrices = product.unit_prices;
-        } else {
-          // Fallback for backward compatibility - create a mapping with the same price for all units
-          const basePrice = parseFloat(product.base_price) || 0;
-          
-          if (product.units && product.units.length > 0) {
-            product.units.forEach(unit => {
-              unitPrices[unit] = basePrice;
-            });
-          } else if (product.unit) {
-            unitPrices[product.unit] = basePrice;
+        // Find the corresponding main unit for this supplier unit
+        if (product.supplier_units && typeof product.supplier_units === 'object') {
+          // Look up the main unit that corresponds to this supplier unit
+          for (const [mainUnit, supUnit] of Object.entries(product.supplier_units)) {
+            if (supUnit === userSupplierUnit) {
+              unitToUse = mainUnit;
+              break;
+            }
           }
         }
         
-        // Store supplier unit information if available
-        let supplierUnit = '';
-        if (product.supplier_unit && typeof product.supplier_unit === 'object') {
-          // Handle case where supplier_unit is a mapping of internal unit to supplier unit
-          supplierUnit = product.supplier_unit[productUnit] || '';
-        } else if (typeof product.supplier_unit === 'string') {
-          // Handle case where supplier_unit is a direct string
-          supplierUnit = product.supplier_unit;
-        } else if (product.satuan_supplier) {
-          // Alternative property name
-          supplierUnit = product.satuan_supplier;
-        }
-          
-        newEditableData.output.items[index].satuan_main = {
-          ...newEditableData.output.items[index].satuan_main,
-          value: productUnit,
-          is_confident: true,
-          available_units: product.units || [product.unit].filter(Boolean), // Store all available units
-          unit_prices: unitPrices, // Store unit-specific prices
-          supplier_unit: supplierUnit // Store supplier unit information
-        };
-        
-        // Also update the satuan field with supplier unit if it exists
-        if (supplierUnit && 'satuan' in newEditableData.output.items[index]) {
-          newEditableData.output.items[index].satuan = {
-            ...newEditableData.output.items[index].satuan,
-            value: supplierUnit,
-            is_confident: true
-          };
+        // If we couldn't find a match, try supplier_unit if it's an object (reverse mapping)
+        if (!unitToUse && product.supplier_unit && typeof product.supplier_unit === 'object') {
+          for (const [mainUnit, supUnit] of Object.entries(product.supplier_unit)) {
+            if (supUnit === userSupplierUnit) {
+              unitToUse = mainUnit;
+              break;
+            }
+          }
         }
       }
       
-      // If harga_dasar_main exists, update it with base_price
-      if ('harga_dasar_main' in newEditableData.output.items[index]) {
-        // Get the selected unit and its price
-        const selectedUnit = newEditableData.output.items[index]?.satuan_main?.value || 
-          (product.units && product.units.length > 0 ? product.units[0] : product.unit || '');
-          
-        const unitPrices = newEditableData.output.items[index]?.satuan_main?.unit_prices || {};
-        const basePrice = selectedUnit && unitPrices[selectedUnit] ? 
-          parseFloat(unitPrices[selectedUnit]) : 
+      // Second priority: Use the first available unit if we couldn't find a match
+      if (!unitToUse && availableUnits.length > 0) {
+        unitToUse = availableUnits[0];
+        
+        // Try to get corresponding supplier unit for this main unit
+        if (product.supplier_unit && typeof product.supplier_unit === 'object') {
+          userSupplierUnit = product.supplier_unit[unitToUse] || supplierUnit;
+        } else if (supplierUnit) {
+          userSupplierUnit = supplierUnit;
+        }
+      }
+      
+      // Update satuan_main if it exists
+      if ('satuan_main' in item) {
+        item.satuan_main = {
+          ...item.satuan_main,
+          value: unitToUse,
+          is_confident: true,
+          available_units: availableUnits, // Store all available units
+          unit_prices: unitPrices, // Store unit-specific prices
+          supplier_unit: userSupplierUnit // Store supplier unit information
+        };
+      }
+      
+      // Update satuan field with supplier unit if it exists
+      if ('satuan' in item && userSupplierUnit) {
+        item.satuan = {
+          ...item.satuan,
+          value: userSupplierUnit,
+          is_confident: true
+        };
+      }
+      
+      // If harga_dasar_main exists, update it with base_price for the selected unit
+      if ('harga_dasar_main' in item) {
+        // Get the price for the selected unit
+        const basePrice = unitToUse && unitPrices[unitToUse] ? 
+          parseFloat(unitPrices[unitToUse]) : 
           parseFloat(product.base_price) || 0;
         
-        newEditableData.output.items[index].harga_dasar_main = {
-          ...newEditableData.output.items[index].harga_dasar_main,
+        item.harga_dasar_main = {
+          ...item.harga_dasar_main,
           value: basePrice,
           is_confident: true
         };
@@ -307,146 +337,183 @@ const ProductSearchDropdown = memo(({
           // Determine what fields to search based on activeCell, but default to search both
           let searchByCode = true;
           let searchByName = true;
+          let searchBySupplierCode = true;
           
           // Only limit to one field if specifically requested
           if (activeCell) {
             if (activeCell.type === 'kode_barang_main') {
               searchByCode = true;
               searchByName = false;
+              searchBySupplierCode = true; // Always check supplier code when searching by codes
             } else if (activeCell.type === 'nama_barang_main') {
               searchByCode = false;
               searchByName = true;
+              searchBySupplierCode = false;
             }
           }
           
-          // Search by product code if appropriate
-          if (searchByCode) {
+          // Specifically search by supplier code first if the search term matches a pattern
+          // This prioritizes exact supplier code matches
+          if (searchBySupplierCode) {
             try {
-              const codeResponse = await axios.get(`${API_BASE_URL}/api/products/search`, {
-                params: {
-                  search: term,
-                  field: 'product_code',
-                  limit: 0 // Request all matching items without limit
-                },
+              const supplierCodeResponse = await axios.get(`${API_BASE_URL}/api/products/supplier/${term}`, {
                 signal: controller.signal
               });
               
-              if (codeResponse?.data?.success === true && Array.isArray(codeResponse.data.data)) {
-                const codeResults = codeResponse.data.data
-                  .map(product => ({
-                    product_code: product.kode_main || product.product_code || '',
-                    product_name: product.nama_main || product.product_name || '',
-                    unit: product.unit || '',
-                    units: product.units || [], // All available units
-                    base_price: product.harga_pokok || product.base_price || 0, // Use harga_pokok instead of harga_jual
-                    price: product.harga_pokok || product.base_price || product.price || 0, // For backward compatibility 
-                    supplier_code: product.supplier_code || '',
-                    unit_prices: product.unit_prices || {}, // Include unit_prices from backend
-                    supplier_unit: product.satuan_supplier || product.supplier_unit || '', // Include supplier unit info
-                    supplier_units: product.supplier_units || {} // Include mapping of units to supplier units
-                  }))
-                  .filter(product => product.product_code !== '123' && product.product_name !== 'test');
+              if (supplierCodeResponse?.data && supplierCodeResponse.data.product_code) {
+                const product = supplierCodeResponse.data;
+                const supplierCodeResult = {
+                  product_code: product.kode_main || product.product_code || '',
+                  product_name: product.nama_main || product.product_name || '',
+                  unit: product.unit || '',
+                  units: product.units || [],
+                  base_price: product.harga_pokok || product.base_price || 0,
+                  price: product.harga_pokok || product.base_price || product.price || 0,
+                  supplier_code: product.supplier_code || term,
+                  unit_prices: product.unit_prices || {},
+                  supplier_unit: product.satuan_supplier || product.supplier_unit || '',
+                  supplier_units: product.supplier_units || {}
+                };
                 
-                results = [...results, ...codeResults];
+                results = [supplierCodeResult];
+                console.log('Found exact match by supplier code:', term);
               }
             } catch (error) {
-              // Error occurred during search by product code
+              // Error in supplier code search, continue with other searches
             }
           }
           
-          // Search by product name if appropriate
-          if (searchByName) {
-            try {
-              const nameResponse = await axios.get(`${API_BASE_URL}/api/products/search`, {
-                params: {
-                  search: term,
-                  field: 'product_name',
-                  limit: 0 // Request all matching items without limit
-                },
-                signal: controller.signal
-              });
-              
-              if (nameResponse?.data?.success === true && Array.isArray(nameResponse.data.data)) {
-                const nameResults = nameResponse.data.data
-                  .map(product => ({
-                    product_code: product.kode_main || product.product_code || '',
-                    product_name: product.nama_main || product.product_name || '',
-                    unit: product.unit || '',
-                    units: product.units || [], // All available units
-                    base_price: product.harga_pokok || product.base_price || 0, // Use harga_pokok instead of harga_jual
-                    price: product.harga_pokok || product.base_price || product.price || 0, // For backward compatibility 
-                    supplier_code: product.supplier_code || '',
-                    unit_prices: product.unit_prices || {}, // Include unit_prices from backend
-                    supplier_unit: product.satuan_supplier || product.supplier_unit || '', // Include supplier unit info
-                    supplier_units: product.supplier_units || {} // Include mapping of units to supplier units
-                  }))
-                  .filter(product => product.product_code !== '123' && product.product_name !== 'test');
-                
-                results = [...results, ...nameResults];
-              }
-            } catch (error) {
-              // Error occurred during search by product name
-            }
-          }
-          
-          // If there was no specific field search or the results are empty, do a general search
+          // Continue with other searches if we haven't found an exact supplier code match
           if (results.length === 0) {
-            try {
-              const generalResponse = await axios.get(`${API_BASE_URL}/api/products/search`, {
-                params: {
-                  search: term,
-                  limit: 0 // Request all matching items without limit
-                },
-                signal: controller.signal
-              });
-              
-              if (generalResponse?.data?.success === true && Array.isArray(generalResponse.data.data)) {
-                const generalResults = generalResponse.data.data
-                  .map(product => ({
-                    product_code: product.kode_main || product.product_code || '',
-                    product_name: product.nama_main || product.product_name || '',
-                    unit: product.unit || '',
-                    units: product.units || [], // All available units
-                    base_price: product.harga_pokok || product.base_price || 0,
-                    price: product.harga_pokok || product.base_price || product.price || 0,
-                    supplier_code: product.supplier_code || '',
-                    unit_prices: product.unit_prices || {},
-                    supplier_unit: product.satuan_supplier || product.supplier_unit || '',
-                    supplier_units: product.supplier_units || {}
-                  }))
-                  .filter(product => product.product_code !== '123' && product.product_name !== 'test');
+            // Search by product code if appropriate
+            if (searchByCode) {
+              try {
+                const codeResponse = await axios.get(`${API_BASE_URL}/api/products/search`, {
+                  params: {
+                    search: term,
+                    field: 'product_code',
+                    limit: 0 // Request all matching items without limit
+                  },
+                  signal: controller.signal
+                });
                 
-                results = [...generalResults];
+                if (codeResponse?.data?.success === true && Array.isArray(codeResponse.data.data)) {
+                  const codeResults = codeResponse.data.data
+                    .map(product => ({
+                      product_code: product.kode_main || product.product_code || '',
+                      product_name: product.nama_main || product.product_name || '',
+                      unit: product.unit || '',
+                      units: product.units || [], // All available units
+                      base_price: product.harga_pokok || product.base_price || 0, // Use harga_pokok instead of harga_jual
+                      price: product.harga_pokok || product.base_price || product.price || 0, // For backward compatibility 
+                      supplier_code: product.supplier_code || '',
+                      unit_prices: product.unit_prices || {}, // Include unit_prices from backend
+                      supplier_unit: product.satuan_supplier || product.supplier_unit || '', // Include supplier unit info
+                      supplier_units: product.supplier_units || {} // Include mapping of units to supplier units
+                    }))
+                    .filter(product => product.product_code !== '123' && product.product_name !== 'test');
+                  
+                  results = [...results, ...codeResults];
+                }
+              } catch (error) {
+                // Error occurred during search by product code
               }
-            } catch (error) {
-              // Error in general search
             }
-          }
-          
-          // Remove duplicates based on product_code
-          const uniqueResults = [];
-          const seenCodes = new Set();
-          for (const product of results) {
-            if (!seenCodes.has(product.product_code)) {
-              seenCodes.add(product.product_code);
-              uniqueResults.push(product);
+            
+            // Search by product name if appropriate
+            if (searchByName) {
+              try {
+                const nameResponse = await axios.get(`${API_BASE_URL}/api/products/search`, {
+                  params: {
+                    search: term,
+                    field: 'product_name',
+                    limit: 0 // Request all matching items without limit
+                  },
+                  signal: controller.signal
+                });
+                
+                if (nameResponse?.data?.success === true && Array.isArray(nameResponse.data.data)) {
+                  const nameResults = nameResponse.data.data
+                    .map(product => ({
+                      product_code: product.kode_main || product.product_code || '',
+                      product_name: product.nama_main || product.product_name || '',
+                      unit: product.unit || '',
+                      units: product.units || [], // All available units
+                      base_price: product.harga_pokok || product.base_price || 0, // Use harga_pokok instead of harga_jual
+                      price: product.harga_pokok || product.base_price || product.price || 0, // For backward compatibility 
+                      supplier_code: product.supplier_code || '',
+                      unit_prices: product.unit_prices || {}, // Include unit_prices from backend
+                      supplier_unit: product.satuan_supplier || product.supplier_unit || '', // Include supplier unit info
+                      supplier_units: product.supplier_units || {} // Include mapping of units to supplier units
+                    }))
+                    .filter(product => product.product_code !== '123' && product.product_name !== 'test');
+                  
+                  results = [...results, ...nameResults];
+                }
+              } catch (error) {
+                // Error occurred during search by product name
+              }
             }
+            
+            // If there was no specific field search or the results are empty, do a general search
+            if (results.length === 0) {
+              try {
+                const generalResponse = await axios.get(`${API_BASE_URL}/api/products/search`, {
+                  params: {
+                    search: term,
+                    limit: 0 // Request all matching items without limit
+                  },
+                  signal: controller.signal
+                });
+                
+                if (generalResponse?.data?.success === true && Array.isArray(generalResponse.data.data)) {
+                  const generalResults = generalResponse.data.data
+                    .map(product => ({
+                      product_code: product.kode_main || product.product_code || '',
+                      product_name: product.nama_main || product.product_name || '',
+                      unit: product.unit || '',
+                      units: product.units || [], // All available units
+                      base_price: product.harga_pokok || product.base_price || 0,
+                      price: product.harga_pokok || product.base_price || product.price || 0,
+                      supplier_code: product.supplier_code || '',
+                      unit_prices: product.unit_prices || {},
+                      supplier_unit: product.satuan_supplier || product.supplier_unit || '',
+                      supplier_units: product.supplier_units || {}
+                    }))
+                    .filter(product => product.product_code !== '123' && product.product_name !== 'test');
+                  
+                  results = [...generalResults];
+                }
+              } catch (error) {
+                // Error in general search
+              }
+            }
+            
+            // Remove duplicates based on product_code
+            const uniqueResults = [];
+            const seenCodes = new Set();
+            for (const product of results) {
+              if (!seenCodes.has(product.product_code)) {
+                seenCodes.add(product.product_code);
+                uniqueResults.push(product);
+              }
+            }
+            
+            results = uniqueResults;
+            
+            // Cache the results
+            setSearchCache(prev => ({
+              ...prev,
+              [term]: results
+            }));
+            
+            setSearchResults(results);
+            setDisplayedItems(results);
+            setHasMore(false);
+            setLastSearchTerm(term);
+            
+            clearTimeout(timeoutId);
           }
-          
-          results = uniqueResults;
-          
-          // Cache the results
-          setSearchCache(prev => ({
-            ...prev,
-            [term]: results
-          }));
-          
-          setSearchResults(results);
-          setDisplayedItems(results);
-          setHasMore(false);
-          setLastSearchTerm(term);
-          
-          clearTimeout(timeoutId);
         } catch (error) {
           // Handle and log search errors
         } finally {
@@ -457,25 +524,6 @@ const ProductSearchDropdown = memo(({
       performSearch();
     }, 300);
   }, [API_BASE_URL, lastSearchTerm, initialItems, activeCell, searchCache]);
-  
-  // Render the suggestion item
-  const renderSuggestionItem = useCallback((item) => {
-    return (
-      <div className="search-item" onClick={() => handleItemSelect(item)}>
-        <div className="search-item__code" title={item.product_code}>{item.product_code}</div>
-        <div className="search-item__name" title={item.product_name}>{item.product_name}</div>
-        <div className="search-item__unit" title={item.unit}>{item.unit}</div>
-        <div className="search-item__price" title={formatCurrency(item.base_price)}>
-          {formatCurrency(item.base_price) || '0'}
-        </div>
-        {item.supplier_unit && (
-          <div className="search-item__supplier-unit" title={`Supplier: ${item.supplier_unit}`}>
-            ({item.supplier_unit})
-          </div>
-        )}
-      </div>
-    );
-  }, [handleItemSelect]);
   
   // Handle click outside the dropdown to close it
   useEffect(() => {
@@ -491,55 +539,107 @@ const ProductSearchDropdown = memo(({
     };
   }, [onClose]);
 
-  // Position the dropdown relative to the active cell
-  // Use portal to render outside the normal DOM hierarchy
+  // Position the dropdown in the center of the screen
   const dropdownStyles = {
-    top: activeCellRef ? activeCellRef.offsetTop + activeCellRef.offsetHeight + 'px' : '0px',
-    left: activeCellRef ? activeCellRef.offsetLeft + 'px' : '0px',
-    minWidth: activeCellRef ? activeCellRef.offsetWidth + 'px' : '300px',
+    position: 'fixed',
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
+    zIndex: 1050,
+    maxWidth: '90vw',
+    width: '600px',
+    maxHeight: '80vh'
   };
   
   // Use a portal for the dropdown to ensure it's rendered at the top level
   return ReactDOM.createPortal(
-    <div 
-      className="product-search-dropdown" 
-      style={dropdownStyles} 
-      ref={dropdownRef}
-    >
-      <div className="search-header">
-        <input
-          type="text"
-          className="search-input"
-          placeholder="Search products..."
-          value={searchTerm}
-          onChange={handleSearchChange}
-          ref={inputRef}
-        />
-        <button className="close-button" onClick={onClose}>×</button>
-      </div>
-      <div className="search-results" ref={scrollContainerRef}>
-        {loading ? (
-          <div className="loading-indicator">Loading...</div>
-        ) : (
-          <>
-            {displayedItems.length === 0 ? (
-              <div className="no-results">
-                {searchTerm.trim() === '' ? 'Start typing to search' : 'No results found'}
+    <>
+      {/* Dark overlay background */}
+      <div 
+        className="fixed inset-0 bg-black bg-opacity-50 z-40"
+        onClick={onClose}
+      />
+      <div 
+        className="fixed z-50 bg-white shadow-lg rounded border border-gray-200 max-w-md w-full text-black overflow-hidden"
+        style={dropdownStyles}
+        ref={dropdownRef}
+      >
+        <div className="p-2 border-b border-gray-200">
+          <input
+            type="text"
+            className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-black bg-white"
+            placeholder={`Minimal 2 karakter - Search ${activeCell?.type === 'kode_barang_main' ? 'product codes' : activeCell?.type === 'nama_barang_main' ? 'product names' : 'products'}...`}
+            value={searchTerm}
+            onChange={handleSearchChange}
+            ref={inputRef}
+          />
+        </div>
+        
+        <div 
+          ref={scrollContainerRef} 
+          className="overflow-y-auto" 
+          style={{ maxHeight: 'calc(80vh - 60px)' }} // Adjust for input field height
+        >
+          {loading && (
+            <div className="p-4 flex justify-center">
+              <svg className="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            </div>
+          )}
+          
+          {!loading && displayedItems.length === 0 && (
+            <div className="p-4 text-center text-gray-500">
+              {searchTerm.trim().length < 2 ? 
+                "Minimal 2 karakter untuk pencarian" : 
+                "No products found"}
+            </div>
+          )}
+          
+          <div className="space-y-1">
+            {displayedItems.map((product, idx) => (
+              <div
+                key={`${product.product_code}-${idx}`}
+                className="px-3 py-2 cursor-pointer hover:bg-blue-50 flex justify-between items-center"
+                onClick={() => handleItemSelect(product)}
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-sm truncate">{product.product_name}</div>
+                  <div className="text-xs text-gray-500 flex justify-between">
+                    <span>Code: {product.product_code}</span>
+                    <span>{product.unit || 'No unit'}</span>
+                  </div>
+                  {product.supplier_code && (
+                    <div className="text-xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded mt-1 inline-block">
+                      Supplier Code: <span className="font-semibold">{product.supplier_code}</span>
+                    </div>
+                  )}
+                </div>
+                <div className="text-sm font-mono text-gray-600 ml-2">
+                  {product.base_price ? formatCurrency(product.base_price) : '-'}
+                </div>
+                {product.supplier_unit && (
+                  <div className="text-xs text-gray-500 ml-2">
+                    ({product.supplier_unit})
+                  </div>
+                )}
               </div>
-            ) : (
-              <>
-                {displayedItems.map((item, index) => (
-                  <React.Fragment key={item.product_code || index}>
-                    {renderSuggestionItem(item)}
-                  </React.Fragment>
-                ))}
-                {isLoadingMore && <div className="loading-indicator">Loading more...</div>}
-              </>
+            ))}
+            
+            {/* Loading indicator when scrolling for more items */}
+            {isLoadingMore && (
+              <div className="p-2 text-center text-gray-500 flex justify-center">
+                <svg className="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              </div>
             )}
-          </>
-        )}
+          </div>
+        </div>
       </div>
-    </div>,
+    </>,
     document.body
   );
 });
