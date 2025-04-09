@@ -788,29 +788,134 @@ export const productItemApi = {
   
   // Get product by supplier code
   getProductBySupplierCode: async (supplierCode) => {
+    console.log(`[API] getProductBySupplierCode called with: ${supplierCode}`);
+    
     if (USE_MOCK_DATA) {
-      console.log(`Using mock data for product with supplier code ${supplierCode}`);
-      const product = mockData.products.find(item => item.supplier_code === supplierCode);
-      return { 
-        success: true, 
-        data: product || null, 
-        message: product ? 'Product found' : 'Product not found' 
+      console.log('[API] Using mock data for supplier code lookup');
+      
+      // Start with basic mock response
+      const mockResponse = {
+        success: true,
+        data: {
+          ID_Produk: 123,
+          Kode_Item: 'MOCK_ITEM_001',
+          Nama_Item: `Mock Product for ${supplierCode}`,
+          Units: [
+            {
+              Nama_Satuan: 'CTN',
+              Is_Base: 1,
+              Satuan_Supplier: 'CTN',
+              prices: [
+                {
+                  Harga_Pokok: '95570',
+                  Harga_Jual: '100000'
+                }
+              ]
+            },
+            {
+              Nama_Satuan: 'PCS',
+              Is_Base: 0,
+              Satuan_Supplier: 'PIECE'
+            }
+          ],
+          Prices: [
+            {
+              Nama_Satuan: 'CTN',
+              Harga_Pokok: '95570'
+            },
+            {
+              Nama_Satuan: 'PCS',
+              Harga_Pokok: '8000'
+            }
+          ],
+          supplier_units: {
+            'CTN': 'CARTON',
+            'PCS': 'PIECE'
+          }
+        }
       };
+      
+      console.log('[API] Mock response for supplier code lookup:', mockResponse);
+      return mockResponse;
     }
     
     try {
-      console.log(`Fetching product with supplier code ${supplierCode} from API`);
-      const response = await api.get(`/api/product-items/supplier/${supplierCode}`);
-      console.log(`Product with supplier code ${supplierCode} API response:`, response);
+      console.log(`[API] Calling backend API for supplier code lookup: ${supplierCode}`);
+      const response = await api.get(`/api/products/invoice`, { 
+        params: { invoiceCode: supplierCode },
+        timeout: 10000
+      });
+      console.log(`[API] Backend response for supplier code ${supplierCode}:`, response.data);
+      
+      // Add supplier_units if needed
+      if (response.data && response.data.success && response.data.data) {
+        const product = response.data.data;
+        
+        // Handle array of products
+        const productArray = Array.isArray(product) ? product : [product];
+        
+        productArray.forEach(prod => {
+          // Ensure standard units array exists
+          if (!prod.units && prod.Units) {
+            prod.units = prod.Units;
+          } else if (!prod.units) {
+            prod.units = [];
+          }
+          
+          // Normalize units to array of strings if needed
+          if (Array.isArray(prod.units) && prod.units.length > 0 && typeof prod.units[0] === 'object') {
+            prod.units = prod.units.map(u => u.Nama_Satuan || u.nama || u.name || '');
+          }
+          
+          // Ensure supplier_units exists - create mapping from units
+          if (!prod.supplier_units && Array.isArray(prod.units) && prod.units.length > 0) {
+            console.log(`[API] Creating supplier_units mapping for ${prod.units.length} units`);
+            prod.supplier_units = {};
+            
+            // Create a 1:1 mapping where each unit maps to itself
+            prod.units.forEach(unit => {
+              if (typeof unit === 'string') {
+                prod.supplier_units[unit] = unit;
+              }
+            });
+            
+            console.log(`[API] Created supplier_units:`, prod.supplier_units);
+          }
+          
+          // Ensure unit_prices exists as an object
+          if (!prod.unit_prices) {
+            prod.unit_prices = {};
+            
+            // Try to use any price information available to populate
+            if (prod.prices && Array.isArray(prod.prices)) {
+              prod.prices.forEach(price => {
+                const unit = price.unit || price.Nama_Satuan || '';
+                const value = price.value || price.Harga_Pokok || price.price || 0;
+                if (unit) {
+                  prod.unit_prices[unit] = value;
+                }
+              });
+            } else if (prod.price || prod.harga_pokok) {
+              // Use main price for first unit if available
+              const defaultPrice = prod.price || prod.harga_pokok || 0;
+              if (prod.units && prod.units.length > 0) {
+                prod.unit_prices[prod.units[0]] = defaultPrice;
+              }
+            }
+          }
+        });
+        
+        console.log(`[API] Final processed response data:`, response.data);
+      }
+      
       return response.data;
     } catch (error) {
-      console.error(`Error fetching product with supplier code ${supplierCode}:`, error);
-      console.log(`Falling back to mock data for product with supplier code ${supplierCode}`);
-      const product = mockData.products.find(item => item.supplier_code === supplierCode);
-      return { 
-        success: true, 
-        data: product || null, 
-        message: product ? 'Product found' : 'Product not found' 
+      console.error(`[API] Error fetching product by supplier code: ${error.message}`);
+      // Return a more descriptive error object
+      return {
+        success: false,
+        error: error.message,
+        status: error.response?.status || 'UNKNOWN'
       };
     }
   },

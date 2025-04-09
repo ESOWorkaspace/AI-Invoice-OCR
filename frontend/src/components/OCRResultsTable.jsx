@@ -34,6 +34,9 @@ export default function OCRResultsTable({ data, onDataChange }) {
   // Track processed invoice codes to avoid redundant searches
   const processedInvoiceCodes = useRef(new Set()).current;
   
+  // Add a ref to track if initial data was processed
+  const initialDataProcessed = useRef(false);
+  
   // Use refs to store function references to break circular dependencies
   const functionRefs = useRef({
     updateSearchStatus: null,
@@ -718,468 +721,257 @@ export default function OCRResultsTable({ data, onDataChange }) {
     }
   }, [data?.id, data?.output?.id]); // Only depend on data id, not the entire object
 
-  // Add a dedicated effect for product lookup that runs only after component and functions are initialized
+  // Add a new useEffect for initial product lookup processing that runs after data is loaded
   useEffect(() => {
-    if (!editableData?.output?.items) return;
-    
-    console.log('OCRResultsTable: Running initial product lookup for all items');
-    
-    // Slightly delay the lookup to ensure all functions are properly initialized
-    const lookupTimer = setTimeout(() => {
-      // Check for items with invoice codes but without main product data
-      const itemsToProcess = editableData.output.items
-        .map((item, index) => ({
-          index,
-          invoiceCode: safeGet(item, 'kode_barang.value', '') ||
-                       safeGet(item, 'kode_barang_invoice.value', '')
-        }))
-        .filter(({ invoiceCode, index }) => {
-          // Only process items that have an invoice code but not a main code
-          const hasInvoiceCode = !!invoiceCode;
-          const hasMainCode = !!safeGet(editableData, `output.items[${index}].kode_barang_main.value`, '');
-          
-          return hasInvoiceCode && !hasMainCode;
+    // Only run once when first loaded with data
+    if (editableData?.output?.items?.length > 0 && !initialDataProcessed.current) {
+      console.log('OCRResultsTable: Running initial product lookup for newly loaded data');
+      
+      // Process all items with invoice codes
+      const processInitialItems = async () => {
+        const itemsWithCodes = [];
+        
+        // Find all items with invoice codes
+        editableData.output.items.forEach((item, index) => {
+          const invoiceCode = safeGet(item, 'kode_barang_invoice.value', '') || 
+                             safeGet(item, 'kode_barang.value', '');
+                           
+          if (invoiceCode && !safeGet(item, 'kode_barang_main.value', '')) {
+            itemsWithCodes.push({
+              index,
+              code: invoiceCode
+            });
+          }
         });
-      
-      console.log(`OCRResultsTable: Found ${itemsToProcess.length} items to process`);
-      
-      // Process each item one by one with slight delay to prevent race conditions
-      if (itemsToProcess.length > 0) {
-        itemsToProcess.forEach(({ invoiceCode, index }, i) => {
-          setTimeout(() => {
-            console.log(`OCRResultsTable: Processing item ${index} with code ${invoiceCode}`);
-            // Use the function from ref to search for the product
-            if (functionRefs.current.searchProductByInvoiceCode) {
-              functionRefs.current.searchProductByInvoiceCode(invoiceCode, index);
-            }
-          }, i * 100); // Stagger lookups by 100ms each
-        });
-      }
-    }, 500); // Wait 500ms to ensure component is fully mounted
-    
-    return () => clearTimeout(lookupTimer);
-  }, [editableData?.output?.items?.length]); // Only run when items array changes
-
-  // Handle changes to item fields
-  const handleItemChange = useCallback((rowIndex, field, value) => {
-      const newData = { ...editableData };
-    const item = newData.output.items && newData.output.items[rowIndex];
-    
-    if (!item) return;
-    
-    // Update the field value
-    item[field] = {
-      ...item[field],
-                  value: value,
-                  is_confident: true
-                };
-    
-    // Special case for kode_barang_invoice
-    // If this field changes and there's a valid value, try to search for the product
-    if (field === 'kode_barang_invoice' && value) {
-      // Check if we already have this product in cache
-      if (productCache[value]) {
-        // Use cached product
-        const product = productCache[value];
         
-        // Update kode_barang_main and nama_barang_main
-        item.kode_barang_main = {
-          ...item.kode_barang_main,
-          value: product.product_code || '',
-          is_confident: true
-        };
+        // Log items being processed
+        console.log(`OCRResultsTable: Found ${itemsWithCodes.length} items with invoice codes for initial lookup`);
         
-        item.nama_barang_main = {
-          ...item.nama_barang_main,
-          value: product.product_name || '',
-          is_confident: true
-        };
-        
-        // Determine supplier unit and unit information
-        let supplierUnit = '';
-        if (product.supplier_unit && typeof product.supplier_unit === 'string') {
-          supplierUnit = product.supplier_unit;
-        } else if (product.satuan_supplier) {
-          supplierUnit = product.satuan_supplier;
-        }
-        
-        // Get all available units for the product
-        const availableUnits = product.units && product.units.length > 0 ? 
-          product.units : [product.unit].filter(Boolean);
+        // Process items with staggered lookups to avoid overwhelming API
+        for (let i = 0; i < itemsWithCodes.length; i++) {
+          const item = itemsWithCodes[i];
+          console.log(`OCRResultsTable: Looking up product for item ${item.index} with code ${item.code}`);
           
-        // Get unit prices
-        let unitPrices = product.unit_prices || {};
-        
-        // Determine the best unit to use
-        let unitToUse = '';
-        let userSupplierUnit = '';
-        
-        // First priority: Check if the item already has a satuan (supplier unit) field
-        if (item.satuan && item.satuan.value) {
-          userSupplierUnit = item.satuan.value;
-          
-          // Find the corresponding main unit for this supplier unit
-          if (product.supplier_units && typeof product.supplier_units === 'object') {
-            // Look up the main unit that corresponds to this supplier unit
-            for (const [mainUnit, supUnit] of Object.entries(product.supplier_units)) {
-              if (supUnit === userSupplierUnit) {
-                unitToUse = mainUnit;
-                break;
-              }
-            }
+          // Wait a bit between lookups
+          if (i > 0) {
+            await new Promise(resolve => setTimeout(resolve, 300));
           }
           
-          // If we couldn't find a match, try supplier_unit if it's an object (reverse mapping)
-          if (!unitToUse && product.supplier_unit && typeof product.supplier_unit === 'object') {
-            for (const [mainUnit, supUnit] of Object.entries(product.supplier_unit)) {
-              if (supUnit === userSupplierUnit) {
-                unitToUse = mainUnit;
-                break;
-              }
-            }
+          try {
+            // Use the simplified lookup function instead
+            await simplifiedProductLookup(item.code, item.index);
+          } catch (error) {
+            console.error(`OCRResultsTable: Error processing item ${item.index}:`, error);
           }
         }
         
-        // Second priority: Use the product unit if no match found
-        if (!unitToUse) {
-          unitToUse = product.unit || (availableUnits.length > 0 ? availableUnits[0] : '');
-          
-          // Try to get corresponding supplier unit for this main unit
-          if (product.supplier_unit && typeof product.supplier_unit === 'object') {
-            userSupplierUnit = product.supplier_unit[unitToUse] || supplierUnit;
-          } else if (supplierUnit) {
-            userSupplierUnit = supplierUnit;
-          }
-        }
-        
-        // Update satuan_main with proper unit and metadata
-        if (unitToUse) {
-          item.satuan_main = {
-            ...item.satuan_main,
-            value: unitToUse,
-            is_confident: true,
-            available_units: availableUnits,
-            unit_prices: unitPrices,
-            supplier_unit: userSupplierUnit
-          };
-        }
-        
-        // Update satuan field with supplier unit if available
-        if (userSupplierUnit && item.satuan) {
-          item.satuan = {
-            ...item.satuan,
-            value: userSupplierUnit,
-            is_confident: true
-          };
-        }
-        
-        // Use base_price (harga_pokok) for the selected unit
-        const basePrice = unitToUse && unitPrices[unitToUse] ? 
-          parseFloat(unitPrices[unitToUse]) : 
-          parseFloat(product.base_price || product.harga_pokok) || 0;
-        
-        if (item.harga_dasar_main) {
-          item.harga_dasar_main = {
-            ...item.harga_dasar_main,
-            value: basePrice,
-          is_confident: true
-        };
-        }
-        
-        setEditableData(newData);
-        if (onDataChange) {
-          onDataChange(newData);
-        }
-      }
+        // Mark as processed
+        initialDataProcessed.current = true;
+        console.log('OCRResultsTable: Initial product lookup completed');
+      };
       
-      setSearchStatus(prev => ({
-        ...prev,
-        [rowIndex]: 'found'
-      }));
-      
-      // Remove from pending searches
-      setPendingSearches(prev => {
-        const newPending = { ...prev };
-        delete newPending[rowIndex];
-        return newPending;
-      });
-      
-      return; // Return early since we found the product in cache
+      // Start processing
+      processInitialItems();
     }
+  }, [editableData?.output?.items]);
+
+  // Handle item change
+  const handleItemChange = (rowIndex, field, value) => {
+    console.log(`OCRResultsTable: Item change - row ${rowIndex}, field ${field}, value:`, value);
     
-    try {
-      setSearchStatus(prev => ({
-        ...prev,
-        [rowIndex]: 'searching'
-      }));
+    // Use functional state update to avoid race conditions
+    setEditableData(prevData => {
+      // Skip update if no data
+      if (!prevData || !prevData.output || !prevData.output.items) {
+        return prevData;
+      }
       
-      // Use the new API endpoint for invoice code search
-      axios.get(`${API_BASE_URL}/api/products/invoice`, {
-        params: { invoiceCode },
-        timeout: 600000 // Add timeout of 10 minutes to prevent hanging requests
-      })
-      .then(response => {
-        // Check if the response has the expected format and contains data
-        if (response?.data?.success === true && 
-            Array.isArray(response.data.data) && 
-            response.data.data.length > 0) {
-          
-          const product = response.data.data[0];
-          
-          // Add the product to cache
-          setProductCache(prev => ({
-            ...prev,
-            [invoiceCode]: product
-          }));
-          
-          // Product found - update the item
-          const newData = { ...editableData };
-          const item = newData.output.items[rowIndex];
-          
-          // Update product mapping for dropdown reference
-          setProductMapping(prev => ({
-            ...prev,
-            [invoiceCode]: product
-          }));
-          
-          // Update the item data
-          if (item) {
-            // Update main code and name
-            item.kode_barang_main = {
-              ...item.kode_barang_main,
-              value: product.product_code || '',
-                  is_confident: true
-                };
-            
-            item.nama_barang_main = {
-              ...item.nama_barang_main,
-              value: product.product_name || '',
-              is_confident: true
-            };
-            
-            // Determine supplier unit and unit information
-            let supplierUnit = '';
-            if (product.supplier_unit && typeof product.supplier_unit === 'string') {
-              supplierUnit = product.supplier_unit;
-            } else if (product.satuan_supplier) {
-              supplierUnit = product.satuan_supplier;
-            }
-            
-            // Get all available units for the product
-            const availableUnits = product.units && product.units.length > 0 ? 
-              product.units : [product.unit].filter(Boolean);
-              
-            // Get unit prices
-            let unitPrices = product.unit_prices || {};
-            
-            // Determine the best unit to use
-            let unitToUse = '';
-            let userSupplierUnit = '';
-            
-            // First priority: Check if the item already has a satuan (supplier unit) field
-            if (item.satuan && item.satuan.value) {
-              userSupplierUnit = item.satuan.value;
-              
-              // Find the corresponding main unit for this supplier unit
-              if (product.supplier_units && typeof product.supplier_units === 'object') {
-                // Look up the main unit that corresponds to this supplier unit
-                for (const [mainUnit, supUnit] of Object.entries(product.supplier_units)) {
-                  if (supUnit === userSupplierUnit) {
-                    unitToUse = mainUnit;
-                    break;
-                  }
-                }
-              }
-              
-              // If we couldn't find a match, try supplier_unit if it's an object (reverse mapping)
-              if (!unitToUse && product.supplier_unit && typeof product.supplier_unit === 'object') {
-                for (const [mainUnit, supUnit] of Object.entries(product.supplier_unit)) {
-                  if (supUnit === userSupplierUnit) {
-                    unitToUse = mainUnit;
-                    break;
-                  }
-                }
-              }
-            }
-            
-            // Second priority: Use the product unit if no match found
-            if (!unitToUse) {
-              unitToUse = product.unit || (availableUnits.length > 0 ? availableUnits[0] : '');
-              
-              // Try to get corresponding supplier unit for this main unit
-              if (product.supplier_unit && typeof product.supplier_unit === 'object') {
-                userSupplierUnit = product.supplier_unit[unitToUse] || supplierUnit;
-              } else if (supplierUnit) {
-                userSupplierUnit = supplierUnit;
-              }
-            }
-            
-            // Update satuan_main with proper unit and metadata
-            if (unitToUse) {
-              item.satuan_main = {
-                ...item.satuan_main,
-                value: unitToUse,
-                is_confident: true,
-                available_units: availableUnits,
-                unit_prices: unitPrices,
-                supplier_unit: userSupplierUnit
-              };
-            }
-            
-            // Update satuan field with supplier unit if available
-            if (userSupplierUnit && item.satuan) {
-              item.satuan = {
-                ...item.satuan,
-                value: userSupplierUnit,
-                  is_confident: true
-                };
-            }
-            
-            // Use base_price (harga_pokok) for the selected unit
-            const basePrice = unitToUse && unitPrices[unitToUse] ? 
-              parseFloat(unitPrices[unitToUse]) : 
-              parseFloat(product.base_price || product.harga_pokok) || 0;
-            
-            if (item.harga_dasar_main) {
-              item.harga_dasar_main = {
-                ...item.harga_dasar_main,
-                value: basePrice,
-                    is_confident: true 
-                  };
-            }
-            
-            setEditableData(newData);
-            if (onDataChange) {
-              onDataChange(newData);
-            }
-          }
-          
-          setSearchStatus(prev => ({
-            ...prev,
-            [rowIndex]: 'found'
-          }));
+      // Clone the data
+      const newData = { ...prevData };
+      const items = [...newData.output.items];
+      
+      // Skip if invalid index
+      if (!items[rowIndex]) {
+        console.error(`OCRResultsTable: Invalid item index: ${rowIndex}`);
+        return prevData;
+      }
+      
+      // Clone the item to avoid direct mutation
+      const item = { ...items[rowIndex] };
+      
+      // Handle invoice code changes - this is important for triggering lookups
+      if (field === 'kode_barang_invoice') {
+        const invoiceCode = String(value || '').trim();
+        
+        // Update the field
+        if (!item[field]) {
+          item[field] = { value: invoiceCode, is_confident: true };
         } else {
-          // No results found
-          setSearchStatus(prev => ({
-            ...prev,
-            [rowIndex]: 'not_found'
-          }));
+          item[field] = { ...item[field], value: invoiceCode, is_confident: true };
         }
         
-        // Remove from pending searches
-        setPendingSearches(prev => {
-          const newPending = { ...prev };
-          delete newPending[rowIndex];
-          return newPending;
-        });
-      })
-      .catch(error => {
-        // Set search status to error
-        setSearchStatus(prev => ({
-          ...prev,
-          [rowIndex]: 'error'
-        }));
-        
-        // Remove from pending searches
-        setPendingSearches(prev => {
-          const newPending = { ...prev };
-          delete newPending[rowIndex];
-          return newPending;
-        });
-      });
-    } catch (error) {
-      // Set search status to error
-      setSearchStatus(prev => ({
-        ...prev,
-        [rowIndex]: 'error'
-      }));
-      
-      // Remove from pending searches
-      setPendingSearches(prev => {
-        const newPending = { ...prev };
-        delete newPending[rowIndex];
-        return newPending;
-      });
-    }
-  }, [API_BASE_URL, editableData, onDataChange, productCache, setProductCache, setProductMapping, setSearchStatus, setPendingSearches]);
-
-  // Handle effect for auto-searching products based on invoice codes
-  useEffect(() => {
-    // Skip if there are no items
-    if (!editableData?.output?.items || editableData.output.items.length === 0) {
-      return;
-    }
-    
-    // Use a small delay to ensure the component is fully mounted
-    const timer = setTimeout(() => {
-      // Check which items need to be searched
-      const itemsToSearch = [];
-      
-      editableData.output.items.forEach((item, index) => {
-        const invoiceCode = safeGet(item, 'kode_barang_invoice.value', '');
-        const mainCode = safeGet(item, 'kode_barang_main.value', '');
-        const searchStat = searchStatus[index];
-        
-        // Consider an item for search if:
-        // 1. It has an invoice code
-        // 2. It doesn't have a main code OR the main code is empty
-        // 3. It hasn't been processed yet
-        // 4. It's not already being searched or has an error/not_found status
-        if (
-          invoiceCode && 
-          (!mainCode || mainCode === '') && 
-          !processedInvoiceCodes.has(invoiceCode) &&
-          (!searchStat || searchStat === 'not_started') 
-        ) {
-          // Add to the list of items to search
-          itemsToSearch.push({ index, invoiceCode });
-          processedInvoiceCodes.add(invoiceCode);
-          
-          // Set status to searching
-          setSearchStatus(prev => ({
-            ...prev,
-            [index]: 'searching'
-          }));
-          
-          setPendingSearches(prev => ({
-            ...prev,
-            [index]: invoiceCode
-          }));
+        // Only trigger lookup if code is not empty and doesn't already have a main code
+        if (invoiceCode && !safeGet(item, 'kode_barang_main.value', '')) {
+          // Schedule lookup with slight delay to avoid blocking UI
+          setTimeout(() => {
+            console.log(`OCRResultsTable: Triggering lookup for new invoice code: ${invoiceCode}`);
+            
+            // Create a unique key for this lookup
+            const lookupKey = `${rowIndex}-${invoiceCode}`;
+            
+            // Only lookup if not already processed
+            if (!processedInvoiceCodes.has(lookupKey)) {
+              processedInvoiceCodes.add(lookupKey);
+              // Use simplified lookup for more consistent behavior
+              simplifiedProductLookup(invoiceCode, rowIndex);
+            } else {
+              console.log(`OCRResultsTable: Skipping duplicate lookup for ${invoiceCode}`);
+            }
+          }, 300);
         }
-      });
-      
-      // Search for each item
-      itemsToSearch.forEach(({ index, invoiceCode }) => {
-        functionRefs.current.searchProductByInvoiceCode(invoiceCode, index);
-      });
-    }, 500); // Short delay to ensure component is ready
-    
-    return () => clearTimeout(timer);
-  }, [editableData, functionRefs, searchStatus, processedInvoiceCodes, setPendingSearches, setSearchStatus]);
-
-  // Add a separate useEffect to handle initial data load auto-search
-  useEffect(() => {
-    // Only run on initial data load
-    if (!data || !data.output || !data.output.items || data.output.items.length === 0) {
-      return;
-    }
-    
-    // Reset processed codes and search status for initial load
-    processedInvoiceCodes.clear();
-    setSearchStatus({});
-    setPendingSearches({});
-    
-    // Set all items with invoice codes to 'not_started' to trigger the main search effect
-    const initialSearchStatus = {};
-    data.output.items.forEach((item, index) => {
-      const invoiceCode = safeGet(item, 'kode_barang_invoice.value', '');
-      if (invoiceCode) {
-        initialSearchStatus[index] = 'not_started';
+      } else {
+        // Default handling for other fields
+        if (typeof item[field] === 'object') {
+          item[field] = { ...item[field], value: value, is_confident: true };
+        } else {
+          item[field] = { value: value, is_confident: true };
+        }
+        
+        // Special handling for calculated fields
+        if (field === 'qty' || field === 'harga_satuan') {
+          // Update harga_bruto (qty * harga_satuan)
+          const qty = parseFloat(safeGet(item, 'qty.value', 0)) || 0;
+          const hargaSatuan = parseFloat(safeGet(item, 'harga_satuan.value', 0)) || 0;
+          
+          if (!isNaN(qty) && !isNaN(hargaSatuan)) {
+            const hargaBruto = qty * hargaSatuan;
+            
+            if (!item.harga_bruto) {
+              item.harga_bruto = { value: hargaBruto, is_confident: true };
+            } else {
+              item.harga_bruto = { ...item.harga_bruto, value: hargaBruto, is_confident: true };
+            }
+            
+            // Update diskon_rp if diskon_persen exists
+            const diskonPersen = parseFloat(safeGet(item, 'diskon_persen.value', 0)) || 0;
+            if (!isNaN(diskonPersen) && diskonPersen > 0) {
+              const diskonRp = Math.round(hargaBruto * (diskonPersen / 100));
+              
+              if (!item.diskon_rp) {
+                item.diskon_rp = { value: diskonRp, is_confident: true };
+              } else {
+                item.diskon_rp = { ...item.diskon_rp, value: diskonRp, is_confident: true };
+              }
+            }
+            
+            // Calculate netto amount
+            const diskonRp = parseFloat(safeGet(item, 'diskon_rp.value', 0)) || 0;
+            const jumlahNetto = Math.max(0, hargaBruto - diskonRp);
+            
+            if (!item.jumlah_netto) {
+              item.jumlah_netto = { value: jumlahNetto, is_confident: true };
+            } else {
+              item.jumlah_netto = { ...item.jumlah_netto, value: jumlahNetto, is_confident: true };
+            }
+            
+            // Update PPN if BKP is true
+            const bkpValue = safeGet(item, 'bkp.value', true);
+            if (bkpValue === true) {
+              // Get PPN rate from parent
+              const ppnRate = parseFloat(safeGet(newData, 'output.ppn_rate.value', 11));
+              // Calculate PPN
+              const ppnValue = Math.round(jumlahNetto * (ppnRate / 100));
+              
+              if (!item.ppn) {
+                item.ppn = { value: ppnValue, is_confident: true };
+              } else {
+                item.ppn = { ...item.ppn, value: ppnValue, is_confident: true };
+              }
+            }
+          }
+        } else if (field === 'diskon_persen') {
+          // Update diskon_rp based on percentage
+          const diskonPersen = parseFloat(value) || 0;
+          const hargaBruto = parseFloat(safeGet(item, 'harga_bruto.value', 0)) || 0;
+          
+          if (!isNaN(diskonPersen) && !isNaN(hargaBruto)) {
+            const diskonRp = Math.round(hargaBruto * (diskonPersen / 100));
+            
+            if (!item.diskon_rp) {
+              item.diskon_rp = { value: diskonRp, is_confident: true };
+            } else {
+              item.diskon_rp = { ...item.diskon_rp, value: diskonRp, is_confident: true };
+            }
+            
+            // Recalculate netto and PPN
+            const jumlahNetto = Math.max(0, hargaBruto - diskonRp);
+            
+            if (!item.jumlah_netto) {
+              item.jumlah_netto = { value: jumlahNetto, is_confident: true };
+            } else {
+              item.jumlah_netto = { ...item.jumlah_netto, value: jumlahNetto, is_confident: true };
+            }
+            
+            // Update PPN if BKP is true
+            const bkpValue = safeGet(item, 'bkp.value', true);
+            if (bkpValue === true) {
+              // Get PPN rate from parent
+              const ppnRate = parseFloat(safeGet(newData, 'output.ppn_rate.value', 11));
+              // Calculate PPN
+              const ppnValue = Math.round(jumlahNetto * (ppnRate / 100));
+              
+              if (!item.ppn) {
+                item.ppn = { value: ppnValue, is_confident: true };
+              } else {
+                item.ppn = { ...item.ppn, value: ppnValue, is_confident: true };
+              }
+            }
+          }
+        } else if (field === 'diskon_rp') {
+          // Recalculate netto and PPN
+          const diskonRp = parseFloat(value) || 0;
+          const hargaBruto = parseFloat(safeGet(item, 'harga_bruto.value', 0)) || 0;
+          
+          if (!isNaN(diskonRp) && !isNaN(hargaBruto)) {
+            // Calculate netto amount
+            const jumlahNetto = Math.max(0, hargaBruto - diskonRp);
+            
+            if (!item.jumlah_netto) {
+              item.jumlah_netto = { value: jumlahNetto, is_confident: true };
+            } else {
+              item.jumlah_netto = { ...item.jumlah_netto, value: jumlahNetto, is_confident: true };
+            }
+            
+            // Update PPN if BKP is true
+            const bkpValue = safeGet(item, 'bkp.value', true);
+            if (bkpValue === true) {
+              // Get PPN rate from parent
+              const ppnRate = parseFloat(safeGet(newData, 'output.ppn_rate.value', 11));
+              // Calculate PPN
+              const ppnValue = Math.round(jumlahNetto * (ppnRate / 100));
+              
+              if (!item.ppn) {
+                item.ppn = { value: ppnValue, is_confident: true };
+              } else {
+                item.ppn = { ...item.ppn, value: ppnValue, is_confident: true };
+              }
+            }
+          }
+        }
       }
+      
+      // Update the item in the array
+      items[rowIndex] = item;
+      newData.output.items = items;
+      
+      // Call onDataChange
+      if (onDataChange) {
+        onDataChange(newData);
+      }
+      
+      return newData;
     });
-    
-    setSearchStatus(initialSearchStatus);
-  }, [data]);
+  };
 
   // Handle BKP change and update PPN
   const handleBKPChange = (rowIndex, value) => {
@@ -2433,209 +2225,251 @@ export default function OCRResultsTable({ data, onDataChange }) {
 
   // Add a direct product lookup function that doesn't rely on refs
   const directProductLookup = async (invoiceCode, itemIndex) => {
-    console.log(`OCRResultsTable: Direct lookup for code ${invoiceCode} for item ${itemIndex}`);
+    console.log(`OCRResultsTable: Looking up product code ${invoiceCode} for item ${itemIndex}`);
     
+    // Check if code already exists
     if (!invoiceCode) {
-      console.warn(`OCRResultsTable: Empty invoice code for direct lookup`);
+      console.log(`OCRResultsTable: Empty product code lookup`);
       return;
     }
     
-    // Update search status
+    // Check if already searching this index
+    if (searchStatus[itemIndex] === 'searching' || searchStatus[itemIndex] === 'loading') {
+      console.log(`OCRResultsTable: Already searching for item ${itemIndex}`);
+      return;
+    }
+    
+    // Update the search status for this item
     setSearchStatus(prev => ({
       ...prev,
-      [itemIndex]: 'loading'
+      [itemIndex]: 'searching'
     }));
     
     try {
-      // Get the current item to check its supplier unit
-      const currentItem = editableData?.output?.items?.[itemIndex] || {};
-      const supplierUnitValue = safeGet(currentItem, 'satuan.value', '').trim();
-      const invoicePrice = parseFloat(safeGet(currentItem, 'harga_satuan.value', '0')) || 0;
+      console.log(`OCRResultsTable: Calling API for invoice code ${invoiceCode}`);
       
-      console.log(`OCRResultsTable: Item ${itemIndex} structure:`, {
-        supplierUnit: supplierUnitValue,
-        invoicePrice: invoicePrice
-      });
-      
-      // Search by supplier code using direct API call
-      console.log(`OCRResultsTable: Calling productItemApi.getProductBySupplierCode with code ${invoiceCode}`);
+      // Get product based on supplier code
       const response = await productItemApi.getProductBySupplierCode(invoiceCode);
-      console.log(`OCRResultsTable: Raw API response:`, response);
       
-      // Handle different response formats
+      console.log(`OCRResultsTable: API response for ${invoiceCode}:`, response);
+      
+      // Extract product data based on response format
       let product = null;
+      
       if (response && response.success === true && response.data) {
-        // New API format: { success: true, data: {...} }
+        // Format: { success: true, data: {...} }
         product = response.data;
-        console.log(`OCRResultsTable: Found product in response.data:`, product);
       } else if (response && response.ID_Produk) {
-        // Direct product object format
+        // Format: Direct product object
         product = response;
-        console.log(`OCRResultsTable: Found product object:`, product);
       } else if (response && Array.isArray(response) && response.length > 0) {
-        // Array response format
+        // Format: Array of products
         product = response[0];
-        console.log(`OCRResultsTable: Found product in array response:`, product);
       }
       
       if (!product) {
         console.warn(`OCRResultsTable: No product found for ${invoiceCode}`);
         setSearchStatus(prev => ({
           ...prev,
-          [itemIndex]: 'notfound'
+          [itemIndex]: 'not_found'
         }));
         return;
       }
       
-      console.log(`OCRResultsTable: Product found:`, product);
+      console.log(`OCRResultsTable: Found product:`, product);
       
-      // Update the product cache
-      setProductCache(prev => ({
-        ...prev,
-        [invoiceCode]: product
-      }));
-      
-      // Update the product data directly
-      setEditableData(prevData => {
-        // Safety check
-        if (!prevData?.output?.items || !prevData.output.items[itemIndex]) {
-          return prevData;
-        }
+      // Add supplier_units if missing and enhance existing mappings
+      if (!product.supplier_units && Array.isArray(product.units || product.Units)) {
+        const units = product.units || product.Units || [];
+        console.log(`OCRResultsTable: Creating supplier_units mapping for units:`, units);
         
-        // Clone the data
-        const newData = { ...prevData };
-        const items = [...newData.output.items];
-        const item = { ...items[itemIndex] };
-        
-        // Update the product data fields
-        console.log(`OCRResultsTable: Updating item with product data:`, {
-          kode: product.Kode_Item,
-          nama: product.Nama_Item
+        product.supplier_units = {};
+        // Create a simple 1:1 mapping where each unit maps to itself
+        units.forEach(unit => {
+          // Handle both string and object units
+          const unitName = typeof unit === 'string' ? unit : (unit.Nama_Satuan || unit.nama || '');
+          if (unitName) {
+            product.supplier_units[unitName] = unitName;
+          }
         });
         
-        // Update main code and name
-        item.kode_barang_main = {
-          value: product.Kode_Item || '',
-          is_confident: true
-        };
-        
-        item.nama_barang_main = {
-          value: product.Nama_Item || '',
-          is_confident: true
-        };
-        
-        // Process units if available (handle both uppercase 'Units' and lowercase 'units')
-        const productUnits = product.Units || product.units || [];
-        
-        if (Array.isArray(productUnits) && productUnits.length > 0) {
-          console.log(`OCRResultsTable: Available units:`, productUnits);
+        // Enhance with invoice unit mappings
+        setEditableData(prevData => {
+          if (!prevData.output?.items?.[itemIndex]) return prevData;
+          const supplierUnit = safeGet(prevData.output.items[itemIndex], 'satuan.value', '');
           
-          // Extract the array of available unit names for the dropdown
-          const availableUnits = productUnits.map(u => u.Nama_Satuan);
-          console.log(`OCRResultsTable: Available unit names for dropdown:`, availableUnits);
-          
-          // Find base unit for reference
-          const baseUnit = productUnits.find(u => u.Is_Base === 1) || productUnits[0];
-          
-          // Try to find matching unit by supplier code
-          let matchingUnit = null;
-          let matchReason = '';
-          
-          // Priority 1: Find direct match with supplier unit
-          if (supplierUnitValue) {
-            matchingUnit = productUnits.find(unit => {
-              const normalizedSupplierUnit = supplierUnitValue.toLowerCase().trim();
-              const normalizedUnitSupplier = (unit.Satuan_Supplier || '').toLowerCase().trim();
-              return normalizedUnitSupplier && normalizedUnitSupplier === normalizedSupplierUnit;
-            });
+          if (supplierUnit) {
+            const normalizedSupplierUnit = supplierUnit.toLowerCase().trim();
             
-            if (matchingUnit) {
-              matchReason = 'exact supplier unit match';
-              console.log(`OCRResultsTable: Found exact supplier unit match: ${matchingUnit.Satuan_Supplier} → ${matchingUnit.Nama_Satuan}`);
-            }
-          }
-          
-          // Priority 2: If no direct match, try fuzzy match
-          if (!matchingUnit && supplierUnitValue) {
-            matchingUnit = productUnits.find(unit => {
-              if (!unit.Satuan_Supplier) return false;
-              
-              const normalizedSupplierUnit = supplierUnitValue.toLowerCase().trim();
-              const normalizedUnitSupplier = unit.Satuan_Supplier.toLowerCase().trim();
-              
-              return normalizedUnitSupplier.includes(normalizedSupplierUnit) || 
-                    normalizedSupplierUnit.includes(normalizedUnitSupplier);
-            });
-            
-            if (matchingUnit) {
-              matchReason = 'fuzzy supplier unit match';
-              console.log(`OCRResultsTable: Found fuzzy supplier unit match: ${matchingUnit.Satuan_Supplier} → ${matchingUnit.Nama_Satuan}`);
-            }
-          }
-          
-          // Fallback to base unit if no match found
-          if (!matchingUnit) {
-            matchingUnit = baseUnit;
-            matchReason = 'fallback to base unit';
-            console.log(`OCRResultsTable: No matching unit found, using base unit: ${baseUnit.Nama_Satuan}`);
-          }
-          
-          // Build the unit prices mapping for calculations
-          const unitPrices = {};
-          
-          // Check both formats for prices: standalone Prices array or nested inside units
-          if (product.Prices && Array.isArray(product.Prices)) {
-            product.Prices.forEach(price => {
-              unitPrices[price.Nama_Satuan] = parseFloat(price.Harga_Pokok || 0);
-            });
-          } else {
-            // Look for prices inside unit objects
-            productUnits.forEach(unit => {
-              if (unit.prices && Array.isArray(unit.prices) && unit.prices.length > 0) {
-                unitPrices[unit.Nama_Satuan] = parseFloat(unit.prices[0].Harga_Pokok || 0);
+            // Find potential matches with available units
+            const availableUnits = product.units || product.Units || [];
+            availableUnits.forEach(unit => {
+              const unitName = typeof unit === 'string' ? unit : (unit.Nama_Satuan || unit.nama || '');
+              if (unitName) {
+                const normalizedUnit = unitName.toLowerCase().trim();
+                
+                // If units contain each other or are similar, create mapping
+                if (normalizedUnit.includes(normalizedSupplierUnit) || 
+                    normalizedSupplierUnit.includes(normalizedUnit)) {
+                  console.log(`OCRResultsTable: Found fuzzy match: ${unitName} ~ ${supplierUnit}`);
+                  product.supplier_units[unitName] = supplierUnit;
+                }
               }
             });
           }
           
-          // Build supplier unit mapping in the exact format that ItemsTable expects
-          // This is crucial! ItemsTable expects: { mainUnit: supplierUnit, ... }
-          const supplierUnits = {};
+          return prevData;
+        });
+      }
+      
+      // Update the product data in the editableData state
+      setEditableData(prevData => {
+        // Clone the data to avoid mutating state directly
+        const newData = { ...prevData };
+        if (!newData.output?.items?.[itemIndex]) return prevData;
+        
+        const items = [...newData.output.items];
+        const item = { ...items[itemIndex] };
+        const supplierUnit = safeGet(item, 'satuan.value', '');
+        
+        // Update main code and name
+        item.kode_barang_main = {
+          value: product.Kode_Item || product.kode_main || product.product_code || '',
+          is_confident: true
+        };
+        
+        item.nama_barang_main = {
+          value: product.Nama_Item || product.nama_main || product.product_name || '',
+          is_confident: true
+        };
+        
+        // Extract units and prices for the dropdown
+        const productUnits = product.Units || product.units || [];
+        let availableUnits = [];
+        
+        // Extract available units based on structure
+        if (Array.isArray(productUnits)) {
+          if (productUnits.length > 0 && typeof productUnits[0] === 'string') {
+            availableUnits = [...productUnits];
+          } else {
+            availableUnits = productUnits.map(u => u.Nama_Satuan || u.nama || '').filter(Boolean);
+          }
+        }
+        
+        // Get supplier unit mappings
+        const supplierUnits = product.supplier_units || {};
+        
+        // Extract unit prices 
+        const unitPrices = {};
+        
+        // Check both formats for prices
+        if (product.Prices && Array.isArray(product.Prices)) {
+          product.Prices.forEach(price => {
+            unitPrices[price.Nama_Satuan] = parseFloat(price.Harga_Pokok || 0);
+          });
+        } else if (product.unit_prices && typeof product.unit_prices === 'object') {
+          Object.entries(product.unit_prices).forEach(([unit, price]) => {
+            unitPrices[unit] = parseFloat(price);
+          });
+        } else if (Array.isArray(productUnits) && typeof productUnits[0] === 'object') {
           productUnits.forEach(unit => {
-            if (unit.Satuan_Supplier) {
-              supplierUnits[unit.Nama_Satuan] = unit.Satuan_Supplier;
+            if (unit.prices && Array.isArray(unit.prices) && unit.prices.length > 0) {
+              const unitName = unit.Nama_Satuan || unit.nama || '';
+              unitPrices[unitName] = parseFloat(unit.prices[0].Harga_Pokok || 0);
             }
           });
-          
-          console.log(`OCRResultsTable: Unit mapping for ItemsTable:`, supplierUnits);
-          
-          // Update the satuan_main field with all necessary data for the dropdown
-          item.satuan_main = {
-            value: matchingUnit.Nama_Satuan,
-            is_confident: true,
-            available_units: availableUnits,
-            supplier_unit: supplierUnitValue,
-            supplier_units: supplierUnits,
-            unit_prices: unitPrices,
-            matchReason: matchReason
-          };
-          
-          console.log(`OCRResultsTable: Set satuan_main for dropdown:`, item.satuan_main);
-          
-          // Set the base price if available for this unit
-          const selectedUnit = matchingUnit.Nama_Satuan;
-          if (unitPrices[selectedUnit]) {
-            item.harga_dasar_main = {
-              value: unitPrices[selectedUnit].toString(),
-              is_confident: true
-            };
+        }
+        
+        // Select the best matching unit using priority logic
+        let selectedUnit = '';
+        
+        // PRIORITY 1: Try to match with supplier unit
+        if (supplierUnit) {
+          for (const [mainUnit, mappedSupplierUnit] of Object.entries(supplierUnits)) {
+            if (mappedSupplierUnit.toLowerCase().trim() === supplierUnit.toLowerCase().trim()) {
+              selectedUnit = mainUnit;
+              console.log(`OCRResultsTable: Selected unit based on direct supplier match: ${mainUnit}`);
+              break;
+            }
           }
+          
+          // If no direct match, try partial match
+          if (!selectedUnit) {
+            for (const [mainUnit, mappedSupplierUnit] of Object.entries(supplierUnits)) {
+              const normalizedMapped = String(mappedSupplierUnit).toLowerCase().trim();
+              const normalizedSupplier = String(supplierUnit).toLowerCase().trim();
+              
+              if (normalizedMapped.includes(normalizedSupplier) || normalizedSupplier.includes(normalizedMapped)) {
+                selectedUnit = mainUnit;
+                console.log(`OCRResultsTable: Selected unit based on partial supplier match: ${mainUnit}`);
+                break;
+              }
+            }
+          }
+        }
+        
+        // PRIORITY 2: Try to find base unit
+        if (!selectedUnit && Array.isArray(productUnits) && typeof productUnits[0] === 'object') {
+          const baseUnit = productUnits.find(u => u.Is_Base === 1);
+          if (baseUnit) {
+            selectedUnit = baseUnit.Nama_Satuan;
+            console.log(`OCRResultsTable: Selected unit based on base unit: ${selectedUnit}`);
+          }
+        }
+        
+        // PRIORITY 3: Match price
+        if (!selectedUnit && Object.keys(unitPrices).length > 0) {
+          const invoicePrice = parseFloat(safeGet(item, 'harga_satuan.value', 0));
+          if (invoicePrice > 0) {
+            let bestMatch = null;
+            let bestDiff = Infinity;
+            
+            for (const [unit, price] of Object.entries(unitPrices)) {
+              const diff = Math.abs(parseFloat(price) - invoicePrice) / invoicePrice;
+              if (diff < bestDiff && diff < 0.025) { // Within 2.5% tolerance
+                bestMatch = unit;
+                bestDiff = diff;
+              }
+            }
+            
+            if (bestMatch) {
+              selectedUnit = bestMatch;
+              console.log(`OCRResultsTable: Selected unit based on price match: ${selectedUnit}`);
+            }
+          }
+        }
+        
+        // PRIORITY 4: Use first available unit
+        if (!selectedUnit && availableUnits.length > 0) {
+          selectedUnit = availableUnits[0];
+          console.log(`OCRResultsTable: Selected first available unit: ${selectedUnit}`);
+        }
+        
+        // Set satuan_main with complete data
+        item.satuan_main = {
+          value: selectedUnit,
+          is_confident: true,
+          available_units: availableUnits,
+          supplier_units: supplierUnits,
+          unit_prices: unitPrices,
+          // Also set units property for compatibility with different component expectations
+          units: availableUnits,
+          supplier_unit: supplierUnit // Store the current supplier unit for reference
+        };
+        
+        // Update price if available for selected unit
+        if (unitPrices[selectedUnit]) {
+          item.harga_dasar_main = {
+            value: unitPrices[selectedUnit],
+            is_confident: true
+          };
         }
         
         // Update the item in the array
         items[itemIndex] = item;
         newData.output.items = items;
         
-        // Call onDataChange if provided
+        // Notify parent component of the change
         if (onDataChange) {
           onDataChange(newData);
         }
@@ -2650,7 +2484,7 @@ export default function OCRResultsTable({ data, onDataChange }) {
       }));
       
     } catch (error) {
-      console.error(`OCRResultsTable: Error in direct product lookup for ${invoiceCode}:`, error);
+      console.error(`OCRResultsTable: Error in product lookup:`, error);
       setSearchStatus(prev => ({
         ...prev,
         [itemIndex]: 'error'
@@ -2668,51 +2502,383 @@ export default function OCRResultsTable({ data, onDataChange }) {
     console.log('OCRResultsTable: Running direct product lookup for items');
     console.log('OCRResultsTable: Total items:', editableData.output.items.length);
     
+    // Get array of current invoice codes for dependency tracking
+    const currentInvoiceCodes = editableData.output.items.map((item, index) => {
+      return {
+        index,
+        code: safeGet(item, 'kode_barang_invoice.value', '') || 
+              safeGet(item, 'kode_barang.value', '') ||
+              safeGet(item, 'supplier_code.value', '') ||
+              safeGet(item, 'invoice_code.value', ''),
+        hasMainCode: !!safeGet(item, 'kode_barang_main.value', '')
+      };
+    });
+    
+    // Filter to only process codes that:
+    // 1. Have an invoice code
+    // 2. Don't already have a main code
+    // 3. Haven't been processed recently (tracked in processedInvoiceCodes)
+    const codesToProcess = currentInvoiceCodes.filter(item => {
+      if (!item.code) {
+        return false; // Skip empty codes
+      }
+      
+      if (item.hasMainCode) {
+        return false; // Skip if already has main code
+      }
+      
+      // Create a unique key to prevent duplicate processing
+      const processKey = `${item.index}-${item.code}`;
+      if (processedInvoiceCodes.has(processKey)) {
+        return false; // Skip if already processed
+      }
+      
+      // Add to processed set
+      processedInvoiceCodes.add(processKey);
+      return true;
+    });
+    
+    // If nothing to process, exit early
+    if (codesToProcess.length === 0) {
+      console.log('OCRResultsTable: No new invoice codes to lookup');
+      return;
+    }
+    
+    console.log(`OCRResultsTable: Will process ${codesToProcess.length} invoice codes for lookup`);
+    
     // Process items with invoice codes
     const timer = setTimeout(() => {
-      // Log all items and their code fields for debugging
-      editableData.output.items.forEach((item, index) => {
-        console.log(`OCRResultsTable: Item ${index} code fields:`, {
-          kode_barang_invoice: safeGet(item, 'kode_barang_invoice.value', ''),
-          kode_barang: safeGet(item, 'kode_barang.value', ''),
-          nama_barang_invoice: safeGet(item, 'nama_barang_invoice.value', ''),
-          kode_main: safeGet(item, 'kode_barang_main.value', '')
-        });
-      });
-      
-      // Check all items for codes to process
-      editableData.output.items.forEach((item, index) => {
-        // Check ALL possible invoice code field names
-        const invoiceCode = 
-          safeGet(item, 'kode_barang_invoice.value', '') || 
-          safeGet(item, 'kode_barang.value', '') ||
-          safeGet(item, 'supplier_code.value', '') ||
-          safeGet(item, 'invoice_code.value', '');
-        
-        // Skip if no invoice code or already has main code
-        const hasMainCode = !!safeGet(item, 'kode_barang_main.value', '');
-        
-        if (!invoiceCode) {
-          console.log(`OCRResultsTable: Item ${index} - No invoice code found, skipping lookup`);
-          return;
-        }
-        
-        if (hasMainCode) {
-          console.log(`OCRResultsTable: Item ${index} - Already has main code, skipping lookup`);
-          return;
-        }
-        
-        console.log(`OCRResultsTable: Will look up item ${index} with code ${invoiceCode}`);
+      // Stagger lookups to avoid overwhelming the server
+      codesToProcess.forEach((item, idx) => {
+        console.log(`OCRResultsTable: Will look up item ${item.index} with code ${item.code}`);
         
         // Use setTimeout to stagger lookups
         setTimeout(() => {
-          directProductLookup(invoiceCode, index);
-        }, index * 500); // Increase timeout to 500ms between items
+          directProductLookup(item.code, item.index);
+        }, idx * 300); // Stagger lookups by 300ms
       });
-    }, 1500); // Increase initial delay to 1.5 seconds
+    }, 500); // Small initial delay
     
     return () => clearTimeout(timer);
-  }, [editableData?.output?.items?.length]);
+  }, [editableData]); // Watch the entire editableData object to catch all changes
+
+  // Add a simplified product lookup function that focuses on mapping
+  const simplifiedProductLookup = async (invoiceCode, itemIndex) => {
+    console.log(`OCRResultsTable: Simplified lookup for code ${invoiceCode} for item ${itemIndex}`);
+    
+    if (!invoiceCode) {
+      console.warn(`OCRResultsTable: Empty invoice code for lookup`);
+      return;
+    }
+    
+    // Update search status
+    setSearchStatus(prev => ({
+      ...prev,
+      [itemIndex]: 'loading'
+    }));
+    
+    try {
+      // Call the API to get product data by supplier code
+      console.log(`OCRResultsTable: Calling API for invoice code ${invoiceCode}`);
+      const response = await productItemApi.getProductBySupplierCode(invoiceCode);
+      console.log(`OCRResultsTable: DIAGNOSTIC: Raw API Response:`, response);
+      
+      // Extract product data based on response format
+      let product = null;
+      
+      if (response && response.success === true && response.data) {
+        // Format: { success: true, data: {...} }
+        // Check if data is an array or object
+        if (Array.isArray(response.data)) {
+          product = response.data[0];
+          console.log(`OCRResultsTable: DIAGNOSTIC: Found product in response.data array[0]:`, product);
+        } else {
+          product = response.data;
+          console.log(`OCRResultsTable: DIAGNOSTIC: Found product in response.data object:`, product);
+        }
+      } else if (response && response.ID_Produk) {
+        // Format: Direct product object
+        product = response;
+        console.log(`OCRResultsTable: DIAGNOSTIC: Found direct product object:`, product);
+      } else if (response && Array.isArray(response) && response.length > 0) {
+        // Format: Array of products
+        product = response[0];
+        console.log(`OCRResultsTable: DIAGNOSTIC: Found product in array response[0]:`, product);
+      }
+      
+      if (!product) {
+        console.warn(`OCRResultsTable: No product found for ${invoiceCode}`);
+        setSearchStatus(prev => ({
+          ...prev,
+          [itemIndex]: 'notfound'
+        }));
+        return;
+      }
+      
+      console.log(`OCRResultsTable: DIAGNOSTIC: Product structure:`, {
+        has_units: !!product.units,
+        units_type: product.units ? (Array.isArray(product.units) ? 'array' : typeof product.units) : 'undefined',
+        units_length: product.units && Array.isArray(product.units) ? product.units.length : 0,
+        has_unit_prices: !!product.unit_prices,
+        has_supplier_units: !!product.supplier_units
+      });
+      
+      // Add supplier_units if missing
+      if (!product.supplier_units && Array.isArray(product.units)) {
+        console.log(`OCRResultsTable: DIAGNOSTIC: Creating default supplier_units mapping for ${product.units.length} units:`, product.units);
+        product.supplier_units = {};
+        
+        // Create a simple 1:1 mapping where each unit maps to itself
+        product.units.forEach(unit => {
+          // If units is an array of strings
+          if (typeof unit === 'string') {
+            product.supplier_units[unit] = unit;
+          }
+          // If units is an array of objects
+          else if (unit && typeof unit === 'object' && unit.Nama_Satuan) {
+            product.supplier_units[unit.Nama_Satuan] = unit.Nama_Satuan;
+          }
+        });
+        
+        console.log(`OCRResultsTable: DIAGNOSTIC: Created default supplier_units:`, product.supplier_units);
+      }
+      
+      // Update the product data in the editableData state
+      setEditableData(prevData => {
+        // Clone the data to avoid mutating state directly
+        const newData = { ...prevData };
+        if (!newData.output?.items?.[itemIndex]) return prevData;
+        
+        const items = [...newData.output.items];
+        const item = { ...items[itemIndex] };
+        const currentSupplierUnit = safeGet(item, 'satuan.value', '');
+        
+        console.log(`OCRResultsTable: DIAGNOSTIC: Current item state:`, {
+          current_supplier_unit: currentSupplierUnit,
+          existing_satuan_main: item.satuan_main ? {
+            value: item.satuan_main.value,
+            has_available_units: !!item.satuan_main.available_units,
+            available_units_length: item.satuan_main.available_units ? item.satuan_main.available_units.length : 0,
+            has_supplier_units: !!item.satuan_main.supplier_units
+          } : 'none'
+        });
+        
+        // STEP 1: Map kode_barang_main and nama_barang_main
+        item.kode_barang_main = {
+          value: product.Kode_Item || product.kode_main || product.product_code || '',
+          is_confident: true
+        };
+        
+        item.nama_barang_main = {
+          value: product.Nama_Item || product.nama_main || product.product_name || '',
+          is_confident: true
+        };
+        
+        // STEP 2: Extract available units
+        const productUnits = product.Units || product.units || [];
+        let availableUnits = [];
+        
+        if (Array.isArray(productUnits)) {
+          // Handle case where units is an array of strings
+          if (productUnits.length > 0 && typeof productUnits[0] === 'string') {
+            availableUnits = [...productUnits];
+            console.log(`OCRResultsTable: DIAGNOSTIC: Units is array of strings, available_units:`, availableUnits);
+          } else {
+            // Handle case where units is an array of objects
+            availableUnits = productUnits.map(u => u.Nama_Satuan);
+            console.log(`OCRResultsTable: DIAGNOSTIC: Units is array of objects, mapped to available_units:`, availableUnits);
+          }
+        }
+        
+        // STEP 3: Map supplier units if available
+        const supplierUnits = product.supplier_units || {};
+        // Add logging to track supplier units
+        console.log(`OCRResultsTable: DIAGNOSTIC: Supplier units before enhancement:`, supplierUnits);
+
+        // If supplier units is empty or minimal, enhance it with reverse mapping
+        if (Object.keys(supplierUnits).length === 0 || Object.keys(supplierUnits).length < availableUnits.length) {
+          console.log(`OCRResultsTable: Adding additional supplier unit mappings`);
+          
+          // Add direct mapping - each unit maps to itself (for cases where supplier uses same unit names)
+          availableUnits.forEach(unit => {
+            if (!supplierUnits[unit]) {
+              supplierUnits[unit] = unit;
+            }
+          });
+          
+          // Try to find the supplier unit from current item
+          const currentSupplierUnit = safeGet(item, 'satuan.value', '');
+          if (currentSupplierUnit) {
+            const normalizedSupplierUnit = currentSupplierUnit.toLowerCase().trim();
+            
+            // Try to find a match for current supplier unit
+            for (const unit of availableUnits) {
+              const normalizedUnit = unit.toLowerCase().trim();
+              
+              // If units contain each other or are similar, create mapping
+              if (normalizedUnit.includes(normalizedSupplierUnit) || 
+                  normalizedSupplierUnit.includes(normalizedUnit)) {
+                console.log(`OCRResultsTable: Found fuzzy match: ${unit} ~ ${currentSupplierUnit}`);
+                supplierUnits[unit] = currentSupplierUnit;
+              }
+            }
+          }
+          
+          console.log(`OCRResultsTable: DIAGNOSTIC: Enhanced supplier units:`, supplierUnits);
+        }
+        
+        console.log(`OCRResultsTable: DIAGNOSTIC: Supplier units:`, supplierUnits);
+        
+        // STEP 4: Extract unit prices
+        const unitPrices = {};
+        
+        // Check both formats for prices
+        if (product.Prices && Array.isArray(product.Prices)) {
+          // Format: separate Prices array
+          product.Prices.forEach(price => {
+            unitPrices[price.Nama_Satuan] = parseFloat(price.Harga_Pokok || 0);
+          });
+        } else if (product.unit_prices && typeof product.unit_prices === 'object') {
+          // Format: unit_prices object from API
+          Object.entries(product.unit_prices).forEach(([unit, price]) => {
+            unitPrices[unit] = parseFloat(price);
+          });
+        } else {
+          // Format: prices inside unit objects
+          if (Array.isArray(productUnits) && typeof productUnits[0] === 'object') {
+            productUnits.forEach(unit => {
+              if (unit.prices && Array.isArray(unit.prices) && unit.prices.length > 0) {
+                unitPrices[unit.Nama_Satuan] = parseFloat(unit.prices[0].Harga_Pokok || 0);
+              }
+            });
+          }
+        }
+        
+        console.log(`OCRResultsTable: DIAGNOSTIC: Unit prices:`, unitPrices);
+        
+        // Find base unit or first unit for default selection
+        let unitValue = '';
+        if (availableUnits.length > 0) {
+          // PRIORITY 1: Try to match with supplier unit
+          const currentSupplierUnit = safeGet(item, 'satuan.value', '');
+          if (currentSupplierUnit) {
+            // Look for a main unit that maps to this supplier unit
+            for (const [mainUnit, supplierUnit] of Object.entries(supplierUnits)) {
+              if (supplierUnit.toLowerCase().trim() === currentSupplierUnit.toLowerCase().trim()) {
+                unitValue = mainUnit;
+                console.log(`OCRResultsTable: DIAGNOSTIC: Selected unit based on direct supplier match: ${mainUnit} -> ${supplierUnit}`);
+                break;
+              }
+            }
+            
+            // If no direct match, try partial match
+            if (!unitValue) {
+              for (const [mainUnit, supplierUnit] of Object.entries(supplierUnits)) {
+                const normalizedMapped = String(supplierUnit).toLowerCase().trim();
+                const normalizedSupplier = String(currentSupplierUnit).toLowerCase().trim();
+                
+                if (normalizedMapped.includes(normalizedSupplier) || normalizedSupplier.includes(normalizedMapped)) {
+                  unitValue = mainUnit;
+                  console.log(`OCRResultsTable: DIAGNOSTIC: Selected unit based on partial supplier match: ${mainUnit} -> ${supplierUnit}`);
+                  break;
+                }
+              }
+            }
+          }
+          
+          // PRIORITY 2: Try to find base unit if units are objects
+          if (!unitValue && Array.isArray(productUnits) && productUnits.length > 0 && typeof productUnits[0] === 'object') {
+            const baseUnit = productUnits.find(u => u.Is_Base === 1);
+            if (baseUnit) {
+              unitValue = baseUnit.Nama_Satuan;
+              console.log(`OCRResultsTable: DIAGNOSTIC: Selected unit based on Is_Base flag: ${unitValue}`);
+            }
+          }
+          
+          // PRIORITY 3: Price match (look for unit with price closest to invoice price)
+          if (!unitValue && Object.keys(unitPrices).length > 0) {
+            const invoicePrice = parseFloat(safeGet(item, 'harga_satuan.value', 0));
+            if (invoicePrice > 0) {
+              let bestMatch = null;
+              let bestDiff = Infinity;
+              
+              for (const [unit, price] of Object.entries(unitPrices)) {
+                const diff = Math.abs(parseFloat(price) - invoicePrice) / invoicePrice;
+                if (diff < bestDiff && diff < 0.025) { // Within 2.5% tolerance
+                  bestMatch = unit;
+                  bestDiff = diff;
+                }
+              }
+              
+              if (bestMatch) {
+                unitValue = bestMatch;
+                console.log(`OCRResultsTable: DIAGNOSTIC: Selected unit based on price match: ${unitValue} (price diff: ${(bestDiff * 100).toFixed(2)}%)`);
+              }
+            }
+          }
+          
+          // PRIORITY 4: If no unit found, use first available
+          if (!unitValue) {
+            unitValue = availableUnits[0];
+            console.log(`OCRResultsTable: DIAGNOSTIC: Selected first available unit: ${unitValue}`);
+          }
+        }
+
+        console.log(`OCRResultsTable: DIAGNOSTIC: Final selected unit value: "${unitValue}"`);
+        
+        // STEP 5: Set satuan_main with complete data
+        const satuan_main = {
+          value: unitValue,
+          is_confident: true,
+          available_units: availableUnits,
+          supplier_units: supplierUnits,
+          unit_prices: unitPrices,
+          // Also set units property for compatibility with different component expectations
+          units: availableUnits
+        };
+        
+        console.log(`OCRResultsTable: DIAGNOSTIC: Final satuan_main object:`, satuan_main);
+        
+        // Set the satuan_main field
+        item.satuan_main = satuan_main;
+        
+        // STEP 6: Set base price if available
+        if (unitPrices[unitValue]) {
+          item.harga_dasar_main = {
+            value: unitPrices[unitValue],
+            is_confident: true
+          };
+        }
+        
+        // Update the item in the array
+        items[itemIndex] = item;
+        newData.output.items = items;
+        
+        // Log the final state of the satuan_main object
+        console.log(`OCRResultsTable: DIAGNOSTIC: Updated item satuan_main:`, items[itemIndex].satuan_main);
+        
+        // Notify parent component of the change
+        if (onDataChange) {
+          onDataChange(newData);
+        }
+        
+        return newData;
+      });
+      
+      // Update search status to found
+      setSearchStatus(prev => ({
+        ...prev,
+        [itemIndex]: 'found'
+      }));
+      
+    } catch (error) {
+      console.error(`OCRResultsTable: Error in product lookup:`, error);
+      setSearchStatus(prev => ({
+        ...prev,
+        [itemIndex]: 'error'
+      }));
+    }
+  };
 
   if (!editableData) {
     return null;
