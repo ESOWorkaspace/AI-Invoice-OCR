@@ -117,7 +117,10 @@ const ItemsTableRow = memo(({
         // Add a special class for cells that are product searchable
         if (column.id === 'kode_barang_main' || column.id === 'nama_barang_main') {
           const rowSearchStatus = searchStatus && searchStatus[rowIndex] ? searchStatus[rowIndex] : null;
-          const needsManualSearch = rowSearchStatus === 'not_found' || rowSearchStatus === 'error';
+          const isSearching = rowSearchStatus === 'searching' || rowSearchStatus === 'loading';
+          const needsManualSearch = rowSearchStatus === 'not_found' || rowSearchStatus === 'error' || rowSearchStatus === 'notfound';
+          const isEmpty = !item.value || item.value === '';
+          const hasValue = item.value && item.value !== '';
           
           cellClass += needsManualSearch ? 'bg-yellow-100 ' : '';
         }
@@ -179,9 +182,11 @@ const renderEditableCell = (
   // Special handling for product search cells
   if (columnId === 'kode_barang_main' || columnId === 'nama_barang_main') {
     // Determine if this cell needs manual search
-    const needsManualSearch = searchStatus[rowIndex] === 'not_found' || searchStatus[rowIndex] === 'error';
-    const isSearching = searchStatus[rowIndex] === 'searching';
+    const rowSearchStatus = searchStatus && searchStatus[rowIndex] ? searchStatus[rowIndex] : null;
+    const isSearching = rowSearchStatus === 'searching' || rowSearchStatus === 'loading';
+    const needsManualSearch = rowSearchStatus === 'not_found' || rowSearchStatus === 'error' || rowSearchStatus === 'notfound';
     const isEmpty = !item.value || item.value === '';
+    const hasValue = item.value && item.value !== '';
     
     return (
       <div 
@@ -194,26 +199,56 @@ const renderEditableCell = (
             <div className="animate-spin h-4 w-4 border-2 border-blue-500 rounded-full border-t-transparent"></div>
             <span>Searching...</span>
           </div>
+        ) : needsManualSearch && isEmpty ? (
+          <span className="text-orange-700">tidak ditemukan, cari...</span>
         ) : isEmpty ? (
-          needsManualSearch ? "tidak ditemukan, cari..." : "Click to search"
+          <span className="text-gray-400 italic">Click to search</span>
         ) : (
-          item.value
+          <span>{item.value}</span>
         )}
       </div>
     );
   }
   
   // Special handling for unit selection dropdown if available_units exists
-  if (columnId === 'satuan_main' && parentItem.satuan_main?.available_units?.length > 0) {
+  if (columnId === 'satuan_main' && (
+    // Check multiple possible locations for available units
+    (parentItem.satuan_main?.available_units?.length > 0) || 
+    (parentItem.satuan_main?.units?.length > 0) ||
+    (parentItem.satuan_main?.supplier_units && Object.keys(parentItem.satuan_main?.supplier_units).length > 0)
+  )) {
     // Get current value from the parentItem (full row data) which should be up-to-date
     const currentValue = safeGet(parentItem, 'satuan_main.value', '');
-    const availableUnits = safeGet(parentItem, 'satuan_main.available_units', []);
+    // Try different sources for available units
+    let availableUnits = safeGet(parentItem, 'satuan_main.available_units', []);
+    
+    // If available_units is empty but units exists, use units
+    if (availableUnits.length === 0 && Array.isArray(parentItem.satuan_main?.units)) {
+      availableUnits = parentItem.satuan_main.units;
+    }
+    
+    // If still empty but supplier_units exists, use keys from supplier_units
+    if (availableUnits.length === 0 && parentItem.satuan_main?.supplier_units) {
+      availableUnits = Object.keys(parentItem.satuan_main.supplier_units);
+    }
+    
+    const supplierUnits = safeGet(parentItem, 'satuan_main.supplier_units', {});
     // Pass the full cell data object for background calculation
     const cellBgColorClass = getCellBackgroundColor(safeGet(parentItem, 'satuan_main')); 
 
+    console.log(`ItemsTableRow: [DIAGNOSTIC] Rendering unit dropdown for row ${rowIndex}:`, {
+      currentValue,
+      availableUnits,
+      supplierUnits,
+      satuan_main_complete: parentItem.satuan_main,
+    });
+
     return (
       <select 
-        className={`w-full py-1 px-2 border-none focus:ring-1 focus:ring-blue-500 focus:outline-none rounded text-sm ${cellBgColor}`}
+        className="w-full py-1 px-2 border-none focus:ring-1 focus:ring-blue-500 focus:outline-none rounded text-sm bg-white"
+        style={{
+          backgroundColor: 'white' // Explicitly set background to white
+        }}
         value={currentValue} // Use value from parentItem state
         onChange={(e) => {
           const selectedUnit = e.target.value;

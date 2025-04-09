@@ -64,6 +64,12 @@ const ItemsTable = memo(({
   useEffect(() => {
     if (!items || !Array.isArray(items)) return;
     
+    console.log(`ItemsTable: [DIAGNOSTIC] Running unit sync effect for ${items.length} items`);
+    
+    // Create a flag to track if we're making any changes
+    let anyChanges = false;
+    const updatedItems = [...items]; // Create a copy of items
+    
     items.forEach((item, rowIndex) => {
       // Skip if this row was just manually changed
       if (rowIndex === manuallyChangedUnitIndex) {
@@ -71,7 +77,21 @@ const ItemsTable = memo(({
         return;
       }
       
-      if (!item.satuan || !item.satuan_main) return;
+      console.log(`ItemsTable: [DIAGNOSTIC] Checking item ${rowIndex}:`, {
+        has_satuan: !!item.satuan,
+        has_satuan_main: !!item.satuan_main,
+        satuan_value: safeGet(item, 'satuan.value', ''),
+        satuan_main_value: safeGet(item, 'satuan_main.value', ''),
+        has_available_units: !!safeGet(item, 'satuan_main.available_units', []).length,
+        available_units: safeGet(item, 'satuan_main.available_units', []),
+        has_supplier_units: !!safeGet(item, 'satuan_main.supplier_units', null),
+        supplier_units: safeGet(item, 'satuan_main.supplier_units', {})
+      });
+      
+      if (!item.satuan || !item.satuan_main) {
+        console.log(`ItemsTable: [DIAGNOSTIC] Skipping item ${rowIndex} - Missing satuan or satuan_main`);
+        return;
+      }
       
       const supplierUnit = safeGet(item, 'satuan.value', '');
       const mainUnit = safeGet(item, 'satuan_main.value', '');
@@ -80,17 +100,22 @@ const ItemsTable = memo(({
       const storedSupplierUnit = safeGet(item, 'satuan_main.supplier_unit', '');
       const invoicePrice = parseFloat(safeGet(item, 'harga_satuan.value', 0));
       
-      if (!supplierUnit) return;
+      if (!supplierUnit) {
+        console.log(`ItemsTable: [DIAGNOSTIC] Skipping item ${rowIndex} - No supplier unit`);
+        return;
+      }
       
       // Skip if current mainUnit is valid and available
       if (mainUnit && availableUnits.includes(mainUnit)) {
-          return; // Skip auto-sync for this item, preserving manual selection
+        console.log(`ItemsTable: [DIAGNOSTIC] Skipping item ${rowIndex} - Main unit "${mainUnit}" is valid in available units:`, availableUnits);
+        return; // Skip auto-sync for this item, preserving manual selection
       }
 
       // Only proceed if we need to update (supplier unit changed OR main unit is invalid/empty)
       const needsUpdate = supplierUnit !== storedSupplierUnit || !mainUnit || !availableUnits.includes(mainUnit);
                          
       if (!needsUpdate) {
+        console.log(`ItemsTable: [DIAGNOSTIC] Skipping item ${rowIndex} - No update needed`);
         return;
       }
       
@@ -107,6 +132,8 @@ const ItemsTable = memo(({
         });
       }
       
+      console.log(`ItemsTable: [DIAGNOSTIC] Supplier units mapping for ${rowIndex}:`, supplierUnits);
+      
       let newMainUnit = '';
       let matchReason = '';
       
@@ -118,9 +145,6 @@ const ItemsTable = memo(({
           // Normalize both strings: trim whitespace and convert to lowercase
           const normalizedMapped = String(mappedSupplierUnit).toLowerCase().trim();
           const normalizedSupplier = String(supplierUnit).toLowerCase().trim();
-          
-          console.log(`  - Comparing "${mappedSupplierUnit}" with "${supplierUnit}"`);
-          console.log(`  - Normalized: "${normalizedMapped}" vs "${normalizedSupplier}"`);
           
           // Check for exact match after normalization
           if (normalizedMapped === normalizedSupplier) {
@@ -179,14 +203,14 @@ const ItemsTable = memo(({
         matchReason = 'first available';
       }
       
-      console.log(`ItemsTable: Selected main unit "${newMainUnit}" (reason: ${matchReason})`);
+      console.log(`ItemsTable: [DIAGNOSTIC] Selected main unit "${newMainUnit}" (reason: ${matchReason}), available units:`, availableUnits);
       
       // If we found a main unit to use and it's different from the current one, update it
       if (newMainUnit && newMainUnit !== mainUnit) {
         console.log(`ItemsTable: Updating main unit from "${mainUnit}" to "${newMainUnit}" (reason: ${matchReason})`);
         
-        // Update satuan_main with the correct main unit and store supplier unit
-        item.satuan_main = {
+        // Create a new satuan_main object with updated values
+        const updatedSatuanMain = {
           ...item.satuan_main,
           value: newMainUnit,
           is_confident: true,
@@ -198,30 +222,62 @@ const ItemsTable = memo(({
           }
         };
         
-        // Use the parent handler to ensure all dependent calculations are performed
-        if (handleUnitChange) {
-          handleUnitChange(rowIndex, newMainUnit);
-        }
+        console.log(`ItemsTable: [DIAGNOSTIC] Updated satuan_main object:`, updatedSatuanMain);
+        
+        // Update the item in our copy
+        updatedItems[rowIndex] = {
+          ...item,
+          satuan_main: updatedSatuanMain
+        };
+        
+        // Flag that we made a change
+        anyChanges = true;
         
         // Also update the base price directly if we have unit prices
         if (unitPrices && newMainUnit in unitPrices) {
           const newBasePrice = parseFloat(unitPrices[newMainUnit]) || 0;
           
-          if (item.harga_dasar_main && newBasePrice > 0) {
+          if (newBasePrice > 0) {
             console.log(`ItemsTable: Updating base price from ${safeGet(item, 'harga_dasar_main.value', 0)} to ${newBasePrice}`);
             
-            // Use handleItemChange to ensure proper state updates
-            handleItemChange(rowIndex, 'harga_dasar_main', newBasePrice);
+            // Update harga_dasar_main in our copy
+            updatedItems[rowIndex] = {
+              ...updatedItems[rowIndex],
+              harga_dasar_main: {
+                ...(updatedItems[rowIndex].harga_dasar_main || {}),
+                value: newBasePrice,
+                is_confident: true
+              }
+            };
+          }
+        }
+      } else {
+        console.log(`ItemsTable: [DIAGNOSTIC] No valid main unit found or no change needed for item ${rowIndex}`);
+      }
+    });
+    
+    // If we made any changes, call the handler to update the parent state
+    if (anyChanges && handleItemChange) {
+      console.log(`ItemsTable: [DIAGNOSTIC] Batch updating ${updatedItems.length} items with unit changes`);
+      // Use a batch update approach instead of individual updates
+      if (handleUnitChange) {
+        for (let i = 0; i < updatedItems.length; i++) {
+          if (updatedItems[i] !== items[i]) {
+            // Only update if the item actually changed
+            console.log(`ItemsTable: [DIAGNOSTIC] Calling handleUnitChange for row ${i} with value:`, updatedItems[i].satuan_main.value);
+            handleUnitChange(i, updatedItems[i].satuan_main.value);
           }
         }
       }
-    });
+    } else {
+      console.log(`ItemsTable: [DIAGNOSTIC] No changes made to any items`);
+    }
     
     // Reset manually changed index after processing all items
     if (manuallyChangedUnitIndex !== null) {
       setManuallyChangedUnitIndex(null);
     }
-  }, [items, handleUnitChange, handleItemChange, manuallyChangedUnitIndex]);
+  }, [items, manuallyChangedUnitIndex]); // Removed handleUnitChange and handleItemChange from deps
   
   // Start resizing
   const startResize = (e, columnId) => {
