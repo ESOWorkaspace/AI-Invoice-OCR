@@ -154,13 +154,25 @@ const ProductSearchDropdown = memo(({
   
   // Handle item selection
   const handleItemSelect = useCallback((product) => {
-    if (!activeCell || activeCell.index === undefined) return;
+    console.log('Product selected:', product);
     
-    const index = activeCell.index;
+    // Check for rowIndex in different possible field names (for robustness)
+    const rowIndex = 
+      activeCell?.rowIndex !== undefined ? activeCell.rowIndex : 
+      activeCell?.index !== undefined ? activeCell.index : undefined;
     
-    if (index >= 0 && editableData?.output?.items) {
+    if (rowIndex === undefined) {
+      console.error('No row index found in activeCell:', activeCell);
+      return;
+    }
+    
+    console.log(`Working with row index: ${rowIndex}`);
+    
+    if (rowIndex >= 0 && editableData?.output?.items) {
       const newEditableData = { ...editableData };
-      const item = newEditableData.output.items[index];
+      const item = { ...newEditableData.output.items[rowIndex] };
+      
+      console.log('Before update:', item);
       
       // Update kode_barang_main if it exists
       if ('kode_barang_main' in item) {
@@ -169,6 +181,7 @@ const ProductSearchDropdown = memo(({
           value: product.product_code,
           is_confident: true
         };
+        console.log(`Updated kode_barang_main to: ${product.product_code}`);
       }
       
       // Update nama_barang_main if it exists
@@ -272,7 +285,7 @@ const ProductSearchDropdown = memo(({
         };
       }
       
-      // If harga_dasar_main exists, update it with base_price for the selected unit
+      // Update harga_dasar_main if it exists
       if ('harga_dasar_main' in item) {
         // Get the price for the selected unit
         const basePrice = unitToUse && unitPrices[unitToUse] ? 
@@ -286,11 +299,28 @@ const ProductSearchDropdown = memo(({
         };
       }
       
+      // Update the item in the items array
+      newEditableData.output.items[rowIndex] = item;
+      console.log('After update:', item);
+      
+      // Verify the data is being updated
+      console.log('Updating editableData');
       setEditableData(newEditableData);
-      if (onDataChange) onDataChange(newEditableData);
+      
+      if (onDataChange) {
+        console.log('Calling onDataChange with updated data');
+        onDataChange(newEditableData);
+      }
     }
     
-    onClose();
+    // Close the dropdown window when a product is selected
+    console.log('Closing dropdown');
+    // Make sure onClose is called immediately and not deferred
+    try {
+      onClose();
+    } catch (error) {
+      console.error('Error closing dropdown:', error);
+    }
   }, [activeCell, editableData, onDataChange, onClose]);
   
   // Handle search input changes
