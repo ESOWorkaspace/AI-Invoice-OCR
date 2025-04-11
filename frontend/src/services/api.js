@@ -156,11 +156,9 @@ const api = axios.create({
 // Add request interceptor to log requests in development
 api.interceptors.request.use(
   (config) => {
-    console.log(`API Request: ${config.method.toUpperCase()} ${config.baseURL}${config.url}`);
     return config;
   },
   (error) => {
-    console.error('API Request Error:', error);
     return Promise.reject(error);
   }
 );
@@ -168,11 +166,9 @@ api.interceptors.request.use(
 // Add response interceptor to log responses in development
 api.interceptors.response.use(
   (response) => {
-    console.log(`API Response: ${response.status} ${response.config.method.toUpperCase()} ${response.config.url}`);
     return response;
   },
   (error) => {
-    console.error('API Response Error:', error);
     return Promise.reject(error);
   }
 );
@@ -182,43 +178,32 @@ export const invoiceApi = {
   // Get all invoices with optional pagination and filtering
   getAll: async (params = {}) => {
     if (USE_MOCK_DATA) {
-      console.log('Using mock data for processed_invoices');
       return mockData.processed_invoices || [];
     }
     
     try {
-      console.log('Fetching processed invoices from API');
       const response = await api.get('/api/invoices/', { params });
-      console.log('Processed invoices API response:', response);
       return response.data;
     } catch (error) {
-      console.error(`Error fetching invoices: ${error.message}`);
-      console.log('Falling back to mock data for processed_invoices');
       return mockData.processed_invoices || [];
     }
   },
   
   getById: async (id) => {
     if (USE_MOCK_DATA) {
-      console.log(`Using mock data for invoice ${id}`);
       return mockData.processed_invoices.find(item => item.id === id);
     }
     
     try {
-      console.log(`Fetching invoice ${id} from API`);
       const response = await api.get(`/api/invoices/${id}`);
-      console.log(`Invoice ${id} API response:`, response);
       return response.data;
     } catch (error) {
-      console.error(`Error fetching invoice ${id}: ${error.message}`);
-      console.log(`Falling back to mock data for invoice ${id}`);
       return mockData.processed_invoices.find(item => item.id === id);
     }
   },
   
   create: async (data) => {
     if (USE_MOCK_DATA) {
-      console.log('Creating mock invoice');
       const newInvoice = {
         id: mockData.processed_invoices.length + 1,
         ...data,
@@ -230,19 +215,15 @@ export const invoiceApi = {
     }
     
     try {
-      console.log('Creating invoice via API');
       const response = await api.post('/api/invoices/', data);
-      console.log('Create invoice API response:', response);
       return response.data;
     } catch (error) {
-      console.error(`Error creating invoice: ${error.message}`);
       throw error;
     }
   },
   
   update: async (id, data) => {
     if (USE_MOCK_DATA) {
-      console.log(`Updating mock invoice ${id}`);
       const index = mockData.processed_invoices.findIndex(item => item.id === id);
       if (index !== -1) {
         mockData.processed_invoices[index] = {
@@ -256,19 +237,15 @@ export const invoiceApi = {
     }
     
     try {
-      console.log(`Updating invoice ${id} via API`);
       const response = await api.put(`/api/invoices/${id}`, data);
-      console.log(`Update invoice ${id} API response:`, response);
       return response.data;
     } catch (error) {
-      console.error(`Error updating invoice ${id}: ${error.message}`);
       throw error;
     }
   },
   
   delete: async (id) => {
     if (USE_MOCK_DATA) {
-      console.log(`Deleting mock invoice ${id}`);
       const index = mockData.processed_invoices.findIndex(item => item.id === id);
       if (index !== -1) {
         mockData.processed_invoices.splice(index, 1);
@@ -278,12 +255,9 @@ export const invoiceApi = {
     }
     
     try {
-      console.log(`Deleting invoice ${id} via API`);
       const response = await api.delete(`/api/invoices/${id}`);
-      console.log(`Delete invoice ${id} API response:`, response);
       return true;
     } catch (error) {
-      console.error(`Error deleting invoice ${id}: ${error.message}`);
       throw error;
     }
   }
@@ -294,18 +268,13 @@ export const rawOcrApi = {
   // Get all raw OCR data with optional pagination
   getAll: async (params = {}) => {
     if (USE_MOCK_DATA) {
-      console.log('Using mock data for raw_ocr_data');
       return mockData.raw_ocr_data || [];
     }
     
     try {
-      console.log('Fetching raw OCR data from API');
       const response = await api.get('/api/raw-ocr/', { params });
-      console.log('Raw OCR data API response:', response);
       return response.data;
     } catch (error) {
-      console.error(`Error fetching raw OCR data: ${error.message}`);
-      console.log('Falling back to mock data for raw_ocr_data');
       return mockData.raw_ocr_data || [];
     }
   },
@@ -313,18 +282,13 @@ export const rawOcrApi = {
   // Get a single raw OCR data by ID
   getById: async (id) => {
     if (USE_MOCK_DATA) {
-      console.log(`Using mock data for raw OCR data ${id}`);
       return mockData.raw_ocr_data.find(item => item.id === id);
     }
     
     try {
-      console.log(`Fetching raw OCR data ${id} from API`);
       const response = await api.get(`/api/raw-ocr/${id}`);
-      console.log(`Raw OCR data ${id} API response:`, response);
       return response.data;
     } catch (error) {
-      console.error(`Error fetching raw OCR data ${id}: ${error.message}`);
-      console.log(`Falling back to mock data for raw OCR data ${id}`);
       return mockData.raw_ocr_data.find(item => item.id === id);
     }
   },
@@ -332,18 +296,13 @@ export const rawOcrApi = {
   // Get raw OCR data by invoice number
   getByInvoiceNumber: async (invoiceNumber) => {
     if (USE_MOCK_DATA) {
-      console.log(`Using mock data for raw OCR data by invoice number ${invoiceNumber}`);
       return mockData.raw_ocr_data.find(item => item.invoice_number === invoiceNumber);
     }
     
     try {
-      console.log(`Fetching raw OCR data by invoice number ${invoiceNumber} from API`);
       const response = await api.get(`/api/raw-ocr/by-invoice/${invoiceNumber}`);
-      console.log(`Raw OCR data by invoice number ${invoiceNumber} API response:`, response);
       return response.data;
     } catch (error) {
-      console.error(`Error fetching raw OCR data by invoice number ${invoiceNumber}: ${error.message}`);
-      console.log(`Falling back to mock data for raw OCR data by invoice number ${invoiceNumber}`);
       return mockData.raw_ocr_data.find(item => item.invoice_number === invoiceNumber);
     }
   },
@@ -351,7 +310,6 @@ export const rawOcrApi = {
   // Create new raw OCR data
   create: async (ocrData) => {
     if (USE_MOCK_DATA) {
-      console.log('Creating mock raw OCR data');
       const newOcrData = {
         id: mockData.raw_ocr_data.length + 1,
         ...ocrData,
@@ -363,12 +321,9 @@ export const rawOcrApi = {
     }
     
     try {
-      console.log('Creating raw OCR data via API');
       const response = await api.post('/api/raw-ocr/', ocrData);
-      console.log('Create raw OCR data API response:', response);
       return response.data;
     } catch (error) {
-      console.error(`Error creating raw OCR data: ${error.message}`);
       throw error;
     }
   },
@@ -376,7 +331,6 @@ export const rawOcrApi = {
   // Update existing raw OCR data
   update: async (id, ocrData) => {
     if (USE_MOCK_DATA) {
-      console.log(`Updating mock raw OCR data ${id}`);
       const index = mockData.raw_ocr_data.findIndex(item => item.id === id);
       if (index !== -1) {
         mockData.raw_ocr_data[index] = {
@@ -390,12 +344,9 @@ export const rawOcrApi = {
     }
     
     try {
-      console.log(`Updating raw OCR data ${id} via API`);
       const response = await api.put(`/api/raw-ocr/${id}`, ocrData);
-      console.log(`Update raw OCR data ${id} API response:`, response);
       return response.data;
     } catch (error) {
-      console.error(`Error updating raw OCR data ${id}: ${error.message}`);
       throw error;
     }
   },
@@ -403,7 +354,6 @@ export const rawOcrApi = {
   // Delete raw OCR data
   delete: async (id) => {
     if (USE_MOCK_DATA) {
-      console.log(`Deleting mock raw OCR data ${id}`);
       const index = mockData.raw_ocr_data.findIndex(item => item.id === id);
       if (index !== -1) {
         mockData.raw_ocr_data.splice(index, 1);
@@ -413,12 +363,9 @@ export const rawOcrApi = {
     }
     
     try {
-      console.log(`Deleting raw OCR data ${id} via API`);
       const response = await api.delete(`/api/raw-ocr/${id}`);
-      console.log(`Delete raw OCR data ${id} API response:`, response);
       return true;
     } catch (error) {
-      console.error(`Error deleting raw OCR data ${id}: ${error.message}`);
       throw error;
     }
   }
@@ -429,18 +376,13 @@ export const productApi = {
   // Get all products with optional pagination and filtering
   getAll: async (params = {}) => {
     if (USE_MOCK_DATA) {
-      console.log('Using mock data for products');
       return mockData.products || [];
     }
     
     try {
-      console.log('Fetching products from API');
       const response = await api.get('/api/products/', { params });
-      console.log('Products API response:', response);
       return response.data;
     } catch (error) {
-      console.error(`Error fetching products: ${error.message}`);
-      console.log('Falling back to mock data for products');
       return mockData.products || [];
     }
   },
@@ -448,18 +390,13 @@ export const productApi = {
   // Get a single product by ID
   getById: async (id) => {
     if (USE_MOCK_DATA) {
-      console.log(`Using mock data for product ${id}`);
       return mockData.products.find(item => item.id === id);
     }
     
     try {
-      console.log(`Fetching product ${id} from API`);
       const response = await api.get(`/api/products/${id}`);
-      console.log(`Product ${id} API response:`, response);
       return response.data;
     } catch (error) {
-      console.error(`Error fetching product ${id}: ${error.message}`);
-      console.log(`Falling back to mock data for product ${id}`);
       return mockData.products.find(item => item.id === id);
     }
   },
@@ -467,18 +404,13 @@ export const productApi = {
   // Get a product by product code
   getByCode: async (productCode) => {
     if (USE_MOCK_DATA) {
-      console.log(`Using mock data for product by code ${productCode}`);
       return mockData.products.find(item => item.product_code === productCode);
     }
     
     try {
-      console.log(`Fetching product by code ${productCode} from API`);
       const response = await api.get(`/api/products/by-code/${productCode}`);
-      console.log(`Product by code ${productCode} API response:`, response);
       return response.data;
     } catch (error) {
-      console.error(`Error fetching product by code ${productCode}: ${error.message}`);
-      console.log(`Falling back to mock data for product by code ${productCode}`);
       return mockData.products.find(item => item.product_code === productCode);
     }
   },
@@ -486,8 +418,6 @@ export const productApi = {
   // Search products by name or code
   search: async (query, params = {}) => {
     if (USE_MOCK_DATA) {
-      console.log(`Using mock data for product search ${query}`);
-      // Filter products by name, code, or supplier_code
       const filteredProducts = mockData.products.filter(product => 
         product.product_name?.toLowerCase().includes(query.toLowerCase()) || 
         product.product_code?.toLowerCase().includes(query.toLowerCase()) ||
@@ -497,15 +427,11 @@ export const productApi = {
     }
     
     try {
-      console.log(`Searching products by ${query} via API`);
       const response = await api.get('/api/products/search', {
         params: { search: query, ...params }
       });
-      console.log(`Search products by ${query} API response:`, response);
       return response.data;
     } catch (error) {
-      console.error(`Error searching products by ${query}: ${error.message}`);
-      console.log(`Falling back to mock data for product search ${query}`);
       const filteredProducts = mockData.products.filter(product => 
         product.product_name?.toLowerCase().includes(query.toLowerCase()) || 
         product.product_code?.toLowerCase().includes(query.toLowerCase()) ||
@@ -518,7 +444,6 @@ export const productApi = {
   // Get product by supplier code
   getBySupplierCode: async (supplierCode) => {
     if (USE_MOCK_DATA) {
-      console.log(`Using mock data for product with supplier code ${supplierCode}`);
       const product = mockData.products.find(product => 
         product.supplier_code?.toLowerCase() === supplierCode.toLowerCase()
       );
@@ -526,13 +451,9 @@ export const productApi = {
     }
     
     try {
-      console.log(`Fetching product with supplier code ${supplierCode} from API`);
       const response = await api.get(`/api/products/supplier/${supplierCode}`);
-      console.log(`Product with supplier code ${supplierCode} API response:`, response);
       return response.data;
     } catch (error) {
-      console.error(`Error fetching product with supplier code ${supplierCode}: ${error.message}`);
-      console.log(`Falling back to mock data for product with supplier code ${supplierCode}`);
       const product = mockData.products.find(product => 
         product.supplier_code?.toLowerCase() === supplierCode.toLowerCase()
       );
@@ -543,7 +464,6 @@ export const productApi = {
   // Create a new product
   create: async (productData) => {
     if (USE_MOCK_DATA) {
-      console.log('Mock mode: Creating product', productData);
       const newProduct = {
         id: Math.floor(Math.random() * 10000),
         ...productData,
@@ -555,12 +475,9 @@ export const productApi = {
     }
     
     try {
-      console.log('Creating product via API');
       const response = await api.post('/api/product-items/', productData);
-      console.log('Create product API response:', response);
       return response.data;
     } catch (error) {
-      console.error(`Error creating product: ${error.message}`);
       throw error;
     }
   },
@@ -568,7 +485,6 @@ export const productApi = {
   // Update an existing product
   update: async (id, productData) => {
     if (USE_MOCK_DATA) {
-      console.log(`Updating mock product ${id}`);
       const index = mockData.products.findIndex(item => item.id === id);
       if (index !== -1) {
         mockData.products[index] = {
@@ -582,12 +498,9 @@ export const productApi = {
     }
     
     try {
-      console.log(`Updating product ${id} via API`);
       const response = await api.put(`/api/products/${id}`, productData);
-      console.log(`Update product ${id} API response:`, response);
       return response.data;
     } catch (error) {
-      console.error(`Error updating product ${id}: ${error.message}`);
       throw error;
     }
   },
@@ -595,7 +508,6 @@ export const productApi = {
   // Create new product with all related data (variants, units, prices)
   createProduct: async (formData) => {
     if (USE_MOCK_DATA) {
-      console.log('Creating mock product with related data');
       const newProductId = mockData.products.length > 0 
         ? Math.max(...mockData.products.map(p => p.id)) + 1 
         : 1;
@@ -616,12 +528,9 @@ export const productApi = {
     }
     
     try {
-      console.log('Creating product with related data via API');
       const response = await api.post('/api/product-items/', formData);
-      console.log('Create product with related data API response:', response);
       return response.data;
     } catch (error) {
-      console.error(`Error creating product with related data: ${error.message}`);
       throw error;
     }
   },
@@ -629,7 +538,6 @@ export const productApi = {
   // Update product with all related data (variants, units, prices)
   updateProduct: async (id, formData) => {
     if (USE_MOCK_DATA) {
-      console.log(`Updating mock product ${id} with related data`);
       const index = mockData.products.findIndex(item => item.id === Number(id));
       if (index !== -1) {
         mockData.products[index] = {
@@ -647,12 +555,9 @@ export const productApi = {
     }
     
     try {
-      console.log(`Updating product ${id} with related data via API`);
       const response = await api.put(`/api/product-items/${id}`, formData);
-      console.log(`Update product ${id} with related data API response:`, response);
       return response.data;
     } catch (error) {
-      console.error(`Error updating product ${id} with related data: ${error.message}`);
       throw error;
     }
   },
@@ -660,7 +565,6 @@ export const productApi = {
   // Update product stock
   updateStock: async (id, quantityChange) => {
     if (USE_MOCK_DATA) {
-      console.log(`Updating mock product stock ${id}`);
       const index = mockData.products.findIndex(item => item.id === id);
       if (index !== -1) {
         mockData.products[index].stock += quantityChange;
@@ -671,12 +575,9 @@ export const productApi = {
     }
     
     try {
-      console.log(`Updating product stock ${id} via API`);
       const response = await api.patch(`/api/products/${id}/stock`, { quantity_change: quantityChange });
-      console.log(`Update product stock ${id} API response:`, response);
       return response.data;
     } catch (error) {
-      console.error(`Error updating product stock ${id}: ${error.message}`);
       throw error;
     }
   },
@@ -684,7 +585,6 @@ export const productApi = {
   // Delete a product
   delete: async (id) => {
     if (USE_MOCK_DATA) {
-      console.log(`Deleting mock product ${id}`);
       const index = mockData.products.findIndex(item => item.id === id);
       if (index !== -1) {
         mockData.products.splice(index, 1);
@@ -694,12 +594,9 @@ export const productApi = {
     }
     
     try {
-      console.log(`Deleting product ${id} via API`);
       const response = await api.delete(`/api/products/${id}`);
-      console.log(`Delete product ${id} API response:`, response);
       return true;
     } catch (error) {
-      console.error(`Error deleting product ${id}: ${error.message}`);
       throw error;
     }
   },
@@ -722,11 +619,9 @@ export const productApi = {
     
     try {
       const response = await api.get('/api/units');
-      // If the API returns a proper units structure, use it
       if (response.data && (Array.isArray(response.data.units) || Array.isArray(response.data))) {
         return response.data;
       } else {
-        // Fallback
         return {
           units: [
             'PCS', 'BOX', 'PACK', 'DUS', 'ROLL', 'LUSIN', 'RIM', 'SET', 
@@ -740,7 +635,6 @@ export const productApi = {
         };
       }
     } catch (error) {
-      console.error('Error fetching units:', error);
       throw error;
     }
   }
@@ -751,18 +645,13 @@ export const productItemApi = {
   // Get all products with optional pagination and filtering
   getAllProducts: async (params = {}) => {
     if (USE_MOCK_DATA) {
-      console.log('Using mock data for all products');
       return mockData.products;
     }
     
     try {
-      console.log('Fetching all products from API with params:', params);
       const response = await api.get('/api/product-items', { params });
-      console.log('All products API response:', response);
       return response.data;
     } catch (error) {
-      console.error('Error fetching all products:', error);
-      console.log('Falling back to mock data for all products');
       return mockData.products;
     }
   },
@@ -770,30 +659,20 @@ export const productItemApi = {
   // Get product by ID with all related data
   getProductById: async (id) => {
     if (USE_MOCK_DATA) {
-      console.log(`Using mock data for product item ${id}`);
       return mockData.productItems.find(item => item.ID_Produk === Number(id));
     }
     
     try {
-      console.log(`Fetching product item ${id} from API`);
       const response = await api.get(`/api/product-items/${id}`);
-      console.log(`Product item ${id} API response:`, response);
       return response.data;
     } catch (error) {
-      console.error(`Error fetching product item ${id}: ${error.message}`);
-      console.log(`Falling back to mock data for product item ${id}`);
       return mockData.productItems.find(item => item.ID_Produk === Number(id));
     }
   },
   
   // Get product by supplier code
   getProductBySupplierCode: async (supplierCode) => {
-    console.log(`[API] getProductBySupplierCode called with: ${supplierCode}`);
-    
     if (USE_MOCK_DATA) {
-      console.log('[API] Using mock data for supplier code lookup');
-      
-      // Start with basic mock response
       const mockResponse = {
         success: true,
         data: {
@@ -835,58 +714,44 @@ export const productItemApi = {
         }
       };
       
-      console.log('[API] Mock response for supplier code lookup:', mockResponse);
       return mockResponse;
     }
     
     try {
-      console.log(`[API] Calling backend API for supplier code lookup: ${supplierCode}`);
       const response = await api.get(`/api/products/invoice`, { 
         params: { invoiceCode: supplierCode },
         timeout: 10000
       });
-      console.log(`[API] Backend response for supplier code ${supplierCode}:`, response.data);
       
-      // Add supplier_units if needed
       if (response.data && response.data.success && response.data.data) {
         const product = response.data.data;
         
-        // Handle array of products
         const productArray = Array.isArray(product) ? product : [product];
         
         productArray.forEach(prod => {
-          // Ensure standard units array exists
           if (!prod.units && prod.Units) {
             prod.units = prod.Units;
           } else if (!prod.units) {
             prod.units = [];
           }
           
-          // Normalize units to array of strings if needed
           if (Array.isArray(prod.units) && prod.units.length > 0 && typeof prod.units[0] === 'object') {
             prod.units = prod.units.map(u => u.Nama_Satuan || u.nama || u.name || '');
           }
           
-          // Ensure supplier_units exists - create mapping from units
           if (!prod.supplier_units && Array.isArray(prod.units) && prod.units.length > 0) {
-            console.log(`[API] Creating supplier_units mapping for ${prod.units.length} units`);
             prod.supplier_units = {};
             
-            // Create a 1:1 mapping where each unit maps to itself
             prod.units.forEach(unit => {
               if (typeof unit === 'string') {
                 prod.supplier_units[unit] = unit;
               }
             });
-            
-            console.log(`[API] Created supplier_units:`, prod.supplier_units);
           }
           
-          // Ensure unit_prices exists as an object
           if (!prod.unit_prices) {
             prod.unit_prices = {};
             
-            // Try to use any price information available to populate
             if (prod.prices && Array.isArray(prod.prices)) {
               prod.prices.forEach(price => {
                 const unit = price.unit || price.Nama_Satuan || '';
@@ -896,7 +761,6 @@ export const productItemApi = {
                 }
               });
             } else if (prod.price || prod.harga_pokok) {
-              // Use main price for first unit if available
               const defaultPrice = prod.price || prod.harga_pokok || 0;
               if (prod.units && prod.units.length > 0) {
                 prod.unit_prices[prod.units[0]] = defaultPrice;
@@ -904,14 +768,10 @@ export const productItemApi = {
             }
           }
         });
-        
-        console.log(`[API] Final processed response data:`, response.data);
       }
       
       return response.data;
     } catch (error) {
-      console.error(`[API] Error fetching product by supplier code: ${error.message}`);
-      // Return a more descriptive error object
       return {
         success: false,
         error: error.message,
@@ -923,7 +783,6 @@ export const productItemApi = {
   // Create new product with all related data
   createProduct: async (data) => {
     if (USE_MOCK_DATA) {
-      console.log('Creating mock product item');
       const newProductId = mockData.productItems.length > 0 
         ? Math.max(...mockData.productItems.map(p => p.ID_Produk)) + 1 
         : 1;
@@ -950,9 +809,8 @@ export const productItemApi = {
     }
     
     try {
-      console.log('Creating new product item via API');
       const response = await api.post('/api/product-items/', data);
-      console.log('Create product item API response:', response);
+      
       return response.data;
     } catch (error) {
       console.error(`Error creating product item: ${error.message}`);
@@ -963,7 +821,7 @@ export const productItemApi = {
   // Update product and related data
   updateProduct: async (id, data) => {
     if (USE_MOCK_DATA) {
-      console.log(`Updating mock product item ${id}`);
+      
       const index = mockData.productItems.findIndex(item => item.ID_Produk === Number(id));
       
       if (index === -1) {
@@ -1046,7 +904,7 @@ export const productItemApi = {
     }
     
     try {
-      console.log(`Updating product item ${id} via API`);
+      
       
       // Make sure all units data includes supplier_units
       if (data.units) {
@@ -1080,7 +938,7 @@ export const productItemApi = {
       }
       
       const response = await api.put(`/api/product-items/${id}`, data);
-      console.log(`Update product item ${id} API response:`, response);
+      
       return response.data;
     } catch (error) {
       console.error(`Error updating product item ${id}: ${error.message}`);
@@ -1091,7 +949,7 @@ export const productItemApi = {
   // Delete product and all related data
   deleteProduct: async (id) => {
     if (USE_MOCK_DATA) {
-      console.log(`Deleting mock product item ${id}`);
+      
       const index = mockData.productItems.findIndex(item => item.ID_Produk === Number(id));
       
       if (index === -1) {
@@ -1103,9 +961,9 @@ export const productItemApi = {
     }
     
     try {
-      console.log(`Deleting product item ${id} via API`);
+      
       const response = await api.delete(`/api/product-items/${id}`);
-      console.log(`Delete product item ${id} API response:`, response);
+     
       return response.data;
     } catch (error) {
       console.error(`Error deleting product item ${id}: ${error.message}`);
@@ -1116,19 +974,18 @@ export const productItemApi = {
   // Delete all products with confirmation code
   deleteAllProducts: async (confirmationCode, confirmationText) => {
     if (USE_MOCK_DATA) {
-      console.log('Mock mode: Would delete all products with confirmation code');
       return { success: true, message: 'All products would be deleted in production mode' };
     }
     
     try {
-      console.log('Deleting all products with confirmation code');
+      
       const response = await api.delete('/api/product-items/delete-all/confirm', {
         data: { 
           confirmationCode,
           confirmationText
         }
       });
-      console.log('Delete all products API response:', response);
+      
       return response.data;
     } catch (error) {
       console.error(`Error deleting all products: ${error.message}`);
@@ -1139,18 +996,18 @@ export const productItemApi = {
   // Import products in bulk
   importProducts: async (data) => {
     if (USE_MOCK_DATA) {
-      console.log('Importing mock product items');
+
       // Handle import logic for mock data if needed
       return { imported: data.products ? data.products.length : 0, failed: 0 };
     }
     
     try {
-      console.log('Importing product items via API');
+     
       const response = await api.post('/api/product-items/import', data);
-      console.log('Import product items API response:', response);
+      
       return response.data;
     } catch (error) {
-      console.error(`Error importing product items: ${error.message}`);
+      
       throw error;
     }
   },
@@ -1158,12 +1015,12 @@ export const productItemApi = {
   // Export all products
   exportProducts: async (format = 'json') => {
     if (USE_MOCK_DATA) {
-      console.log('Mock mode: Would export products in ' + format + ' format');
+   
       return mockData.products;
     }
     
     try {
-      console.log(`Exporting products in ${format} format`);
+      
       
       if (format === 'csv') {
         // For CSV, we need to use a different approach to handle the file download
@@ -1196,15 +1053,15 @@ export const productItemApi = {
   // Import products in bulk
   importProducts: async (data) => {
     if (USE_MOCK_DATA) {
-      console.log('Importing mock product items');
+
       // Handle import logic for mock data if needed
       return { imported: data.products ? data.products.length : 0, failed: 0 };
     }
     
     try {
-      console.log('Importing product items via API');
+      
       const response = await api.post('/api/product-items/import', data);
-      console.log('Import product items API response:', response);
+      
       return response.data;
     } catch (error) {
       console.error(`Error importing product items: ${error.message}`);
@@ -1229,7 +1086,6 @@ export const databaseApi = {
   // Get database information
   getInfo: async () => {
     if (USE_MOCK_DATA) {
-      console.log('Using mock data for database info');
       return {
         name: 'invoice_ocr_db',
         type: 'PostgreSQL',
@@ -1244,13 +1100,11 @@ export const databaseApi = {
     }
     
     try {
-      console.log('Fetching database info from API');
+
       const response = await api.get('/api/database/info');
-      console.log('Database info API response:', response);
       return response.data;
     } catch (error) {
       console.error(`Error fetching database info: ${error.message}`);
-      console.log('Falling back to mock data for database info');
       return {
         name: 'invoice_ocr_db',
         type: 'PostgreSQL',
@@ -1268,7 +1122,7 @@ export const databaseApi = {
   // Get table information
   getTableInfo: async (tableName) => {
     if (USE_MOCK_DATA) {
-      console.log(`Using mock data for table ${tableName}`);
+
       const tableData = mockData[tableName] || [];
       return {
         name: tableName,
@@ -1279,13 +1133,10 @@ export const databaseApi = {
     }
     
     try {
-      console.log(`Fetching table ${tableName} info from API`);
       const response = await api.get(`/api/database/tables/${tableName}`);
-      console.log(`Table ${tableName} info API response:`, response);
       return response.data;
     } catch (error) {
       console.error(`Error fetching table ${tableName} info: ${error.message}`);
-      console.log(`Falling back to mock data for table ${tableName}`);
       const tableData = mockData[tableName] || [];
       return {
         name: tableName,
@@ -1299,7 +1150,7 @@ export const databaseApi = {
   // Get all tables information
   getAllTables: async () => {
     if (USE_MOCK_DATA) {
-      console.log('Using mock data for all tables');
+
       return [
         { 
           id: 'processed_invoices', 
@@ -1326,13 +1177,12 @@ export const databaseApi = {
     }
     
     try {
-      console.log('Fetching all tables info from API');
+
       const response = await api.get('/api/database/tables');
-      console.log('All tables info API response:', response);
+
       return response.data;
     } catch (error) {
       console.error(`Error fetching all tables info: ${error.message}`);
-      console.log('Falling back to mock data for all tables');
       return [
         { 
           id: 'processed_invoices', 
