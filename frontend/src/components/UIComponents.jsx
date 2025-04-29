@@ -110,21 +110,26 @@ export const BooleanField = ({ data, onChange, options = ['Ya', 'Tidak'] }) => {
   const value = data?.value;
   
   // Determine background color based on confidence level
+  // Use the same logic as getCellBackgroundColor for consistency
   let bgColor = 'bg-white'; // Default
   
-  if (data?.from_database) {
-    bgColor = 'bg-green-100'; // Green for database fields
+  // Always show include_ppn with white background regardless of confidence
+  if (data?.is_confident === true) {
+    bgColor = 'bg-white'; // White for confident values
   } else if (value === null || value === undefined) {
     bgColor = 'bg-red-100'; // Red for null values
   } else if (data?.is_confident === false) {
     bgColor = 'bg-orange-100'; // Orange for low confidence
-  } else if (data?.is_confident === true) {
-    bgColor = 'bg-white'; // White for high confidence
+  } else if (data?.from_database === true) {
+    bgColor = 'bg-green-50'; // Light green for DB source
   }
+  
+  // Make sure we properly handle boolean conversions
+  const isTrue = value === true || value === 'true' || value === 'Ya' || value === 1;
   
   return (
     <select
-      value={value === true ? options[0] : options[1]}
+      value={isTrue ? options[0] : options[1]}
       onChange={(e) => onChange(e.target.value === options[0])}
       className={`w-full border-0 focus:ring-0 ${bgColor}`}
     >

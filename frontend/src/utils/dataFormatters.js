@@ -10,11 +10,43 @@
 export const parseNumber = (value) => {
   if (typeof value === 'number') return value;
   if (typeof value === 'string') {
-    // Handle Indonesian number format (dots as thousand separators, comma as decimal)
-    // First, remove all dots
-    let cleanValue = value.replace(/\./g, '');
-    // Then, replace comma with dot for decimal
-    cleanValue = cleanValue.replace(/,/g, '.');
+    // Handle Indonesian number format and mixed formats
+    // (dots/periods as thousand separators, comma as decimal)
+    
+    // Check if there are both commas and periods
+    const commaCount = (value.match(/,/g) || []).length;
+    const periodCount = (value.match(/\./g) || []).length;
+    
+    let cleanValue = value;
+    
+    if (commaCount > 0 && periodCount > 0) {
+      // Mixed format - determine which is the decimal separator
+      // In Indonesian format, the last separator is typically the decimal point
+      const lastCommaPos = value.lastIndexOf(',');
+      const lastPeriodPos = value.lastIndexOf('.');
+      
+      if (lastPeriodPos > lastCommaPos) {
+        // Period is the decimal separator (e.g., "1,000.25")
+        // Remove all commas, keep the period
+        cleanValue = value.replace(/,/g, '');
+      } else {
+        // Comma is the decimal separator (e.g., "1.000,25")
+        // Remove all periods, then convert comma to period for JS parsing
+        cleanValue = value.replace(/\./g, '').replace(',', '.');
+      }
+    } else if (commaCount > 0) {
+      // Only commas - treat as decimal if just one, otherwise as thousand separator
+      if (commaCount === 1) {
+        cleanValue = value.replace(',', '.');
+      } else {
+        // Multiple commas - treat as thousand separators
+        cleanValue = value.replace(/,/g, '');
+      }
+    } else if (periodCount > 0) {
+      // Only periods - no need to change (JS parses with period as decimal)
+      cleanValue = value;
+    }
+    
     // Convert to number
     const result = Number(cleanValue);
     // Return the number or 0 if it's NaN
@@ -117,9 +149,9 @@ export const formatCellValue = (value, key) => {
       case 'currency':
         return formatCurrency(value);
       case 'percentage':
-        // Format percentage with 2 decimal places and % sign
+        // Format number with 2 decimal places without % sign
         const numPercent = parseFloat(value) || 0;
-        return `${numPercent.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+        return numPercent.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       case 'number': // Format plain numbers with thousand separators
         const num = parseNumber(value); // Use parseNumber to handle potential commas/dots
         if (isNaN(num)) return '-';

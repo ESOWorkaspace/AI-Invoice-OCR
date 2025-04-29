@@ -121,6 +121,8 @@ const ItemsTableRow = memo(({
           const needsManualSearch = rowSearchStatus === 'not_found' || rowSearchStatus === 'error' || rowSearchStatus === 'notfound';
           const isEmpty = !item.value || item.value === '';
           const hasValue = item.value && item.value !== '';
+          const isSuccess = rowSearchStatus === 'success';
+          const isCached = rowSearchStatus === 'cached';
           
           cellClass += needsManualSearch ? 'bg-yellow-100 ' : '';
         }
@@ -187,11 +189,13 @@ const renderEditableCell = (
     const needsManualSearch = rowSearchStatus === 'not_found' || rowSearchStatus === 'error' || rowSearchStatus === 'notfound';
     const isEmpty = !item.value || item.value === '';
     const hasValue = item.value && item.value !== '';
+    const isSuccess = rowSearchStatus === 'success';
+    const isCached = rowSearchStatus === 'cached';
     
     return (
       <div 
         id={`cell-${columnId}-${rowIndex}`}
-        className={`w-full cursor-pointer ${isEmpty ? 'text-gray-400 italic' : ''}`}
+        className={`w-full cursor-pointer text-sm overflow-hidden ${isEmpty ? 'text-gray-400 italic' : ''}`}
         onClick={() => handleProductCellClick(columnId, rowIndex)}
       >
         {isSearching ? (
@@ -203,6 +207,8 @@ const renderEditableCell = (
           <span className="text-orange-700">tidak ditemukan, cari...</span>
         ) : isEmpty ? (
           <span className="text-gray-400 italic">Click to search</span>
+        ) : isSuccess || isCached ? (
+          <span className="text-green-700">{item.value}</span>
         ) : (
           <span>{item.value}</span>
         )}
@@ -213,69 +219,107 @@ const renderEditableCell = (
   // Special handling for unit selection dropdown if available_units exists
   if (columnId === 'satuan_main' && (
     // Check multiple possible locations for available units
-    (parentItem.satuan_main?.available_units?.length > 0) || 
-    (parentItem.satuan_main?.units?.length > 0) ||
+    (Array.isArray(parentItem.satuan_main?.available_units) && parentItem.satuan_main?.available_units.length > 0) || 
+    (Array.isArray(parentItem.satuan_main?.units) && parentItem.satuan_main?.units.length > 0) ||
     (parentItem.satuan_main?.supplier_units && Object.keys(parentItem.satuan_main?.supplier_units).length > 0)
   )) {
     // Get current value from the parentItem (full row data) which should be up-to-date
     const currentValue = safeGet(parentItem, 'satuan_main.value', '');
-    // Try different sources for available units
-    let availableUnits = safeGet(parentItem, 'satuan_main.available_units', []);
     
-    // If available_units is empty but units exists, use units
-    if (availableUnits.length === 0 && Array.isArray(parentItem.satuan_main?.units)) {
+    // Get available units from the enhanced data structure
+    let availableUnits = [];
+    
+    // Check for properly formatted available_units array (objects with name property)
+    if (Array.isArray(parentItem.satuan_main?.available_units)) {
+      if (parentItem.satuan_main.available_units.length > 0) {
+        // Check if the first item is an object with a name property
+        if (typeof parentItem.satuan_main.available_units[0] === 'object' && 
+            parentItem.satuan_main.available_units[0].name) {
+          // Extract just the names for the dropdown
+          availableUnits = parentItem.satuan_main.available_units.map(unit => unit.name);
+        } else {
+          // Use the array directly if they're not objects
+          availableUnits = parentItem.satuan_main.available_units;
+        }
+      }
+    } 
+    // Fallback to other unit sources if available
+    else if (Array.isArray(parentItem.satuan_main?.units)) {
       availableUnits = parentItem.satuan_main.units;
     }
-    
-    // If still empty but supplier_units exists, use keys from supplier_units
-    if (availableUnits.length === 0 && parentItem.satuan_main?.supplier_units) {
+    else if (parentItem.satuan_main?.supplier_units) {
       availableUnits = Object.keys(parentItem.satuan_main.supplier_units);
     }
+    // If unit_prices exist, use their keys as available units
+    else if (parentItem.satuan_main?.unit_prices && Object.keys(parentItem.satuan_main.unit_prices).length > 0) {
+      availableUnits = Object.keys(parentItem.satuan_main.unit_prices);
+    }
     
+    // If we have a product object and it has units, use those
+    if (availableUnits.length === 0 && parentItem.product) {
+      if (parentItem.product.Units && Array.isArray(parentItem.product.Units)) {
+        availableUnits = parentItem.product.Units.map(u => 
+          typeof u === 'string' ? u : (u.Nama_Satuan || '')
+        ).filter(Boolean);
+      } else if (parentItem.product.units && Array.isArray(parentItem.product.units)) {
+        availableUnits = parentItem.product.units.map(u => 
+          typeof u === 'string' ? u : (u.Nama_Satuan || '')
+        ).filter(Boolean);
+      }
+    }
+    
+    // Deduplicate the units
+    availableUnits = [...new Set(availableUnits)];
+
+    // Get supplier units metadata if available
     const supplierUnits = safeGet(parentItem, 'satuan_main.supplier_units', {});
+    
     // Pass the full cell data object for background calculation
     const cellBgColorClass = getCellBackgroundColor(safeGet(parentItem, 'satuan_main')); 
 
-    console.log(`ItemsTableRow: [DIAGNOSTIC] Rendering unit dropdown for row ${rowIndex}:`, {
-      currentValue,
-      availableUnits,
-      supplierUnits,
-      satuan_main_complete: parentItem.satuan_main,
-    });
-
+    // Provide both dropdown and manual input options
     return (
-      <select 
-        className="w-full py-1 px-2 border-none focus:ring-1 focus:ring-blue-500 focus:outline-none rounded text-sm bg-white"
-        style={{
-          backgroundColor: 'white' // Explicitly set background to white
-        }}
-        value={currentValue} // Use value from parentItem state
-        onChange={(e) => {
-          const selectedUnit = e.target.value;
-          console.log(`ItemsTableRow: Unit changed for row ${rowIndex} from "${currentValue}" to "${selectedUnit}"`);
-          // Call handleUnitChange with the row index and selected unit
-          handleUnitChange(rowIndex, selectedUnit); 
-        }}
-      >
-        {/* If dropdown is empty, show a placeholder */}
-        {availableUnits.length === 0 && (
-          <option value="">No units available</option>
-        )}
-        
-        {/* Ensure the currently selected value is always an option */}
-        {currentValue && !availableUnits.includes(currentValue) && (
-          <option key={`current-${currentValue}`} value={currentValue}>
-            {currentValue} (Current)
-          </option>
-        )}
-        
-        {/* Available units from the product */}
-        {availableUnits.map((unit, idx) => (
-          <option key={`unit-${idx}`} value={unit}>
-            {unit}
-          </option>
-        ))}
-      </select>
+      <div className="relative flex flex-row items-stretch w-full">
+        <span className="text-xs text-gray-500 self-center">{safeGet(parentItem, 'satuan_main.invoice_unit', '')} {'= '} </span>
+        <select 
+          id={`satuan-main-select-${rowIndex}`}
+          className="w-full py-1 px-2 border-none focus:ring-1 focus:ring-blue-500 focus:outline-none rounded text-sm bg-white"
+          style={{
+            backgroundColor: 'white' // Explicitly set background to white
+          }}
+          value={currentValue} // Use value from parentItem state
+          onChange={(e) => {
+            // Get the selected unit from dropdown
+            const selectedUnit = e.target.value;
+            
+            // Call handleUnitChange with the row index and selected unit
+            if (handleUnitChange) {
+              handleUnitChange(rowIndex, selectedUnit);
+            } else {
+              console.error('ItemsTableRow: handleUnitChange prop is not provided');
+            }
+          }}
+        >
+          {/* If dropdown is empty, show a placeholder */}
+          {availableUnits.length === 0 && (
+            <option value="">No units available</option>
+          )}
+          
+          {/* Ensure the currently selected value is always an option */}
+          {currentValue && !availableUnits.includes(currentValue) && (
+            <option key={`current-${currentValue}`} value={currentValue}>
+              {currentValue} (Current)
+            </option>
+          )}
+          
+          {/* Available units from the product */}
+          {availableUnits.map((unit, idx) => (
+            <option key={`unit-${idx}`} value={unit}>
+              {unit}
+            </option>
+          ))}
+        </select>
+      </div>
     );
   }
   
@@ -332,8 +376,68 @@ const renderEditableCell = (
         
         let displayValueInInput = '';
         if (item.value !== null && item.value !== undefined) {
-          if (type === 'percentage' || columnId === 'diskon_persen') {
-            displayValueInInput = String(item.value).replace('.', ',');
+          // Special handling for discount fields
+          if (columnId === 'diskon_persen' || columnId === 'diskon_rp') {
+            // For discount fields, check if the input field is currently focused
+            const inputId = `discount-field-${rowIndex}-${columnId}`;
+            if (document.activeElement === document.getElementById(inputId)) {
+              // If focused, preserve the exact string format from the input
+              const inputEl = document.getElementById(inputId);
+              if (inputEl) {
+                displayValueInInput = inputEl.value;
+              } else {
+                // If element not found, fall back to formatted value
+                const numValue = parseFloat(item.value);
+                displayValueInInput = !isNaN(numValue) ? 
+                  numValue.toLocaleString('id-ID', {
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 2,
+                    useGrouping: false
+                  }).replace('.', ',') : '';
+              }
+            } else {
+              // Not focused, format the number normally
+              const numValue = parseFloat(item.value);
+              if (!isNaN(numValue)) {
+                // Check if the value has decimal places
+                const hasDecimal = numValue !== Math.floor(numValue);
+                
+                // Format with appropriate decimal places
+                displayValueInInput = numValue.toLocaleString('id-ID', {
+                  minimumFractionDigits: hasDecimal ? 2 : 0,
+                  maximumFractionDigits: 2,
+                  useGrouping: columnId === 'diskon_rp'
+                }).replace('.', ',');
+              } else {
+                displayValueInInput = '';
+              }
+            }
+          } else if (type === 'percentage') {
+            // For percentage fields, especially discount percentage
+            // Only show decimal places if needed (not for whole numbers)
+            const numValue = parseFloat(item.value);
+            if (!isNaN(numValue)) {
+              // Check if the value has decimal places
+              const hasDecimal = numValue !== Math.floor(numValue);
+              
+              // Format with appropriate decimal places
+              displayValueInInput = numValue.toLocaleString('id-ID', {
+                minimumFractionDigits: hasDecimal ? 2 : 0,
+                maximumFractionDigits: 2,
+                useGrouping: false
+              }).replace('.', ',');
+              
+              // If user is currently editing this field and it ends with comma or period,
+              // preserve that so they can continue typing the decimal part
+              if (document.activeElement === document.querySelector(`#discount-field-${rowIndex}-${columnId}`)) {
+                const inputEl = document.querySelector(`#discount-field-${rowIndex}-${columnId}`);
+                if (inputEl && (inputEl.value.endsWith(',') || inputEl.value.endsWith('.'))) {
+                  displayValueInInput = displayValueInInput + ',';
+                }
+              }
+            } else {
+              displayValueInInput = '';
+            }
           } else {
             // For regular numbers, show with grouping separators
             const numValue = parseNumber(item.value || 0);
@@ -346,23 +450,94 @@ const renderEditableCell = (
 
         return (
           <input
+            id={`discount-field-${rowIndex}-${columnId}`}
             type="text" 
             inputMode="decimal"
             value={displayValueInInput}
             step={step}
             onChange={(e) => {
               let val = e.target.value;
-              let numericValue;
-              if (type === 'percentage' || columnId === 'diskon_persen') {
-                val = val.replace(/[^0-9,]/g, '');
-                const parts = val.split(',');
-                if (parts.length > 2) val = `${parts[0]},${parts.slice(1).join('')}`;
-                numericValue = parseFloat(val.replace(',', '.') || 0);
+              
+              if (columnId === 'diskon_persen' || columnId === 'diskon_rp') {
+                // For discount fields, we want to:
+                // 1. Preserve the exact string input for display
+                // 2. Convert to float for calculations and state
+                
+                // First, validate that it contains valid characters
+                if (/^[0-9.,]*$/.test(val)) {
+                  // Handle conversion to float for calculation
+                  let floatValue = 0;
+                  
+                  if (val !== '' && val !== '.' && val !== ',') {
+                    // Normalize to use period as decimal separator for parseFloat
+                    const lastCommaIndex = val.lastIndexOf(',');
+                    const lastPeriodIndex = val.lastIndexOf('.');
+                    
+                    if (lastCommaIndex !== -1 || lastPeriodIndex !== -1) {
+                      // If we have a decimal separator
+                      const lastSepIndex = Math.max(lastCommaIndex, lastPeriodIndex);
+                      const wholePart = val.substring(0, lastSepIndex).replace(/[,.]/g, '');
+                      const decimalPart = val.substring(lastSepIndex + 1);
+                      
+                      // Build properly formatted number for parsing
+                      const parseReady = `${wholePart}.${decimalPart}`;
+                      floatValue = parseFloat(parseReady);
+                    } else {
+                      // No decimal separator
+                      floatValue = parseFloat(val.replace(/[,.]/g, ''));
+                    }
+                    
+                    // If parsing failed for some reason, default to 0
+                    if (isNaN(floatValue)) floatValue = 0;
+                  }
+                  
+                  // Update the state with the floating point value
+                  onChange(floatValue);
+                }
+                // If input contains invalid chars, don't update
+              } else if (type === 'percentage') {
+                // Allow direct input of numbers, comma and period for decimal separator
+                // First, remove any non-number, non-separator characters
+                val = val.replace(/[^0-9,.]/g, ''); // Only allow comma as decimal in diskon_persen
+                
+                // For diskon_persen, allow both comma and period as decimal separator
+                // First, normalize both to use a standard separator (period) for parsing
+                const lastCommaIndex = val.lastIndexOf(',');
+                const lastPeriodIndex = val.lastIndexOf('.');
+                
+                if (lastCommaIndex !== -1 || lastPeriodIndex !== -1) {
+                  // Determine which separator was used last
+                  const lastSeparatorIndex = Math.max(lastCommaIndex, lastPeriodIndex);
+                  
+                  // Split the value into whole and decimal parts
+                  const wholePart = val.substring(0, lastSeparatorIndex).replace(/[,.]/g, '');
+                  const decimalPart = val.substring(lastSeparatorIndex + 1);
+                  
+                  // Rebuild with period for parseFloat
+                  val = `${wholePart}.${decimalPart}`;
+                }
+                
+                // Parse value
+                const numericValue = parseFloat(val);
+                
+                // Update if it's a valid number
+                if (!isNaN(numericValue)) {
+                  // Limit to 2 decimal places
+                  const roundedValue = parseFloat(numericValue.toFixed(2));
+                  onChange(roundedValue);
+                } else if (val === '' || val === '.' || val === ',') {
+                  // Empty or just separator - set to 0
+                  onChange(0);
+                } else {
+                  // Keep the current input while editing, even if not a valid number yet
+                  onChange(item.value);
+                }
               } else {
+                // Standard handling for other numeric fields
                 val = val.replace(/[^0-9.,]/g, '');
-                numericValue = parseNumber(val);
+                const numericValue = parseNumber(val);
+                onChange(isNaN(numericValue) ? 0 : numericValue);
               }
-              onChange(isNaN(numericValue) ? 0 : numericValue);
             }}
             className={`w-full bg-transparent border-none p-1 focus:ring-1 focus:ring-blue-500 focus:outline-none rounded text-sm ${column.align === 'right' ? 'text-right' : ''} ${cellBgColor}`}
           />
@@ -373,7 +548,6 @@ const renderEditableCell = (
       
     case 'difference_percent':
       // The parentItem contains the whole row data
-      console.log('Row data for difference calculation:', parentItem);
       
       // Extract the harga_dasar_main and harga_satuan values directly from the row data
       const hargaDasarObj = parentItem.harga_dasar_main || {};
@@ -383,9 +557,6 @@ const renderEditableCell = (
       const hargaDasar = parseFloat(hargaDasarObj.value || 0);
       const hargaSatuan = parseFloat(hargaSatuanObj.value || 0);
       
-      console.log(`Difference calculation - Row: ${rowIndex}, Column: ${columnId}`);
-      console.log(`  - hargaDasar: ${hargaDasar}`);
-      console.log(`  - hargaSatuan: ${hargaSatuan}`);
       
       // Calculate percentage difference
       let percentDiff = 0;
@@ -412,9 +583,7 @@ const renderEditableCell = (
       );
       
     case 'difference_amount':
-      // Use the same approach as difference_percent
-      console.log('Row data for amount difference calculation:', parentItem);
-      
+
       // Extract prices directly from the parent row data
       const baseObj = parentItem.harga_dasar_main || {};
       const invoiceObj = parentItem.harga_satuan || {};
@@ -423,9 +592,6 @@ const renderEditableCell = (
       const basePriceDiff = parseFloat(baseObj.value || 0);
       const invoicePriceDiff = parseFloat(invoiceObj.value || 0);
       
-      console.log(`Amount difference calculation - Row: ${rowIndex}, Column: ${columnId}`);
-      console.log(`  - basePriceDiff: ${basePriceDiff}`);
-      console.log(`  - invoicePriceDiff: ${invoicePriceDiff}`);
       
       // Calculate absolute difference
       const amountDiff = invoicePriceDiff - basePriceDiff;
