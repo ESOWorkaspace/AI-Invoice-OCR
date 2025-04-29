@@ -5,13 +5,31 @@
 
 > ✨ **A modern web application to extract and process invoice data using OCR technology**
 
-## 🌟 Overview
+---
 
-The AI Invoice OCR Processing System is a powerful microservice designed to automate the extraction of data from invoice images using Optical Character Recognition (OCR) technology. This application streamlines the invoice processing workflow by automatically extracting key information such as invoice numbers, dates, vendor details, and line items.
+**⚠️ Project Status: Abandoned ⚠️**
+
+**Development on this AI Invoice OCR system has been discontinued due to persistent bugs and significant user experience issues that proved difficult to resolve.**
+
+While the core concept aimed to automate invoice processing via OCR and map extracted data against a product database, the implementation encountered several critical problems, primarily in the frontend:
+
+*   **Frontend Instability:** Issues with file handling during uploads, unreliable API connections (often falling back to dummy data instead of the intended backend API specified in environment variables), and difficulties managing state leading to unpredictable behavior.
+*   **UI/UX Problems:** Styling inconsistencies (e.g., incorrect text colors not matching validation status), poor performance during data mapping and editing in tables (causing excessive re-renders and a sluggish interface), and bugs within the product editing features.
+*   **Debugging Challenges:** The accumulation of various hard-to-trace bugs led to the decision to halt further development on this specific codebase.
+
+**The intention is now to pursue a manual data entry system, likely involving a complete rebuild.** This repository serves as an archive of the attempted OCR implementation and is no longer actively maintained.
+
+The original overview and feature list below describe the *intended* functionality, not the final working state. Sections detailing setup and usage are preserved for historical context only.
+
+---
+
+## 🌟 Overview (Original Goal)
+
+The AI Invoice OCR Processing System *was designed* as a powerful microservice to automate the extraction of data from invoice images using Optical Character Recognition (OCR) technology. This application *aimed* to streamline the invoice processing workflow by automatically extracting key information such as invoice numbers, dates, vendor details, and line items.
 
 ![App Demo](https://via.placeholder.com/800x400?text=AI+Invoice+OCR+Demo)
 
-## ✅ Key Features
+## ✅ Key Features (Intended)
 
 - 🖼️ **OCR Processing**: Upload and process invoice images to extract structured data
 - 📋 **Data Validation**: Confidence indicators for extracted data
@@ -21,7 +39,9 @@ The AI Invoice OCR Processing System is a powerful microservice designed to auto
 - 📊 **Product Catalog**: Maintain a database of products for invoice matching
 - 🔍 **Search Functionality**: Find invoices by number, vendor, or content
 
-## 🚀 Getting Started
+## 🚀 Getting Started (Archival - Not Recommended for Use)
+
+**Note:** These instructions are preserved for archival purposes only. This project is abandoned and not recommended for active use or development due to the issues mentioned above.
 
 ### Prerequisites
 
@@ -29,7 +49,7 @@ The AI Invoice OCR Processing System is a powerful microservice designed to auto
 - PostgreSQL database
 - Web browser (Chrome, Firefox, Edge recommended)
 
-### Installation
+### Installation (Archival)
 
 1. **Clone the repository**
    ```bash
@@ -39,7 +59,7 @@ The AI Invoice OCR Processing System is a powerful microservice designed to auto
 
 2. **Configure environment variables**
    ```bash
-   cp .env.example .env
+   # Create a .env file based on .env.example or existing setup
    # Edit .env with your database credentials and settings
    ```
 
@@ -55,15 +75,18 @@ The AI Invoice OCR Processing System is a powerful microservice designed to auto
    npm install
    ```
 
-5. **Initialize the database**
+5. **Initialize the database (if attempting to run)**
    ```bash
    cd ../backend
-   node migrate.js init
+   # Command might be `node migrate.js init` or similar based on project setup
+   # Review migrate.js and package.json scripts
    ```
 
-## 🖥️ Running the Application
+## 🖥️ Running the Application (Archival - Not Recommended for Use)
 
-### Development Mode
+**Note:** Running this application may expose the bugs and issues that led to its abandonment.
+
+### Development Mode (Archival)
 
 1. **Start backend server**
    ```bash
@@ -77,31 +100,21 @@ The AI Invoice OCR Processing System is a powerful microservice designed to auto
    npm run dev
    ```
 
-3. **Access the application**
-   - Frontend: http://localhost:5173
-   - Backend API: http://localhost:1512
+3. **Access the application (if it runs)**
+   - Frontend: Typically http://localhost:5173 (check Vite output)
+   - Backend API: Typically http://localhost:1512 (check backend config/env)
 
-### Production Mode
+### Production Mode (Archival)
 
-1. **Build frontend**
-   ```bash
-   cd frontend
-   npm run build
-   ```
+Potentially unstable and not recommended.
 
-2. **Start backend server**
-   ```bash
-   cd ../backend
-   npm start
-   ```
+## 📋 Usage Guide (Intended Workflow - May Be Broken)
 
-## 📋 Usage Guide
-
-1. **Upload Invoice**: Navigate to the OCR page and upload an invoice image
-2. **Review Extraction**: Check the extracted data with confidence indicators
-3. **Edit if Needed**: Modify any incorrect data (low confidence fields highlighted in orange/red)
-4. **Save to Database**: Save the processed invoice to the database
-5. **Manage Invoices**: Use the Database Management page to view, edit, or delete invoices
+1. **Upload Invoice**: Navigate to the OCR page and upload an invoice image.
+2. **Review Extraction**: Check the extracted data (expect potential inaccuracies or UI bugs).
+3. **Edit if Needed**: Attempt to modify data (expect re-render issues or bugs).
+4. **Save to Database**: Attempt to save the processed invoice.
+5. **Manage Invoices**: Use the Database Management page (functionality may be incomplete or buggy).
 
 ## 🏗️ Project Structure
 
@@ -110,34 +123,35 @@ ai-invoice-ocr/
 ├── backend/               # Express.js server
 │   ├── src/               # Backend source code
 │   ├── migrations/        # Database migrations
-│   └── uploads/           # Temporary file uploads
+│   └── uploads/           # Temporary file uploads (if used)
+│   └── models/            # Sequelize models (likely)
+│   └── config/            # Database config (likely)
 ├── frontend/              # React frontend application
 │   ├── src/               # Frontend source code
+│   │   ├── components/
+│   │   ├── hooks/
+│   │   ├── pages/
+│   │   ├── services/
+│   │   └── utils/
 │   ├── public/            # Static assets
-│   └── dist/              # Compiled frontend (production)
-├── .env                   # Environment variables
-└── .env.example           # Example environment configuration
+│   └── dist/              # Compiled frontend (production build output)
+├── .env                   # Environment variables (critical, not committed)
+├── .cursorrules           # AI assistant rules for this project
+├── memory-bank/           # Documentation for AI assistant
+└── README.md              # This file
 ```
 
-## 🔌 API Reference
+## 🔌 API Reference (Archival)
 
-Refer to the backend README for detailed API documentation.
+Refer to the backend `README.md` or source code (`backend/src/routes` or similar) for details on the API endpoints that were implemented. Note that frontend connectivity issues were reported.
 
-## 🧪 Testing
+## 🧪 Testing (Archival)
 
-```bash
-# Backend tests
-cd backend
-npm test
-
-# Frontend tests
-cd frontend
-npm test
-```
+Testing infrastructure might exist but is likely outdated or incomplete given the project's status.
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are no longer accepted as this project is abandoned.
 
 ## 📜 License
 
@@ -149,4 +163,4 @@ Created by [Engineer Setengah Otak](https://github.com/engineersetengahotak)
 
 ---
 
-⭐ **Star this repository if you find it useful!** ⭐
+⭐ **This repository is archived.** ⭐
